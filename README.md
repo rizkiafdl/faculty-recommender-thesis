@@ -166,11 +166,39 @@ Untuk GPU, ubah `EMBEDDING_DEVICE=cuda` di file `.env`.
 
 ## Screenshots
 
-Hasil capture UI ada di folder `screenshots/`:
+### Dashboard
+![Dashboard](screenshots/dashboard.png)
 
-- `screenshots/dashboard.png`
-- `screenshots/supervisors.png`
-- `screenshots/runs.png`
+### Supervisor Studio
+![Supervisor Studio](screenshots/supervisors.png)
+
+### Run History
+![Run History](screenshots/runs.png)
+
+## Referensi Riset (2022-2026)
+
+Daftar berikut dipilih untuk latar belakang skripsi, metode content-based/embedding, dan evaluasi sistem rekomendasi:
+
+1. Roy, D. & Dutta, M. (2022). *A systematic review and research perspective on recommender systems*. Journal of Big Data, 9, 59. https://doi.org/10.1186/s40537-022-00592-5
+2. Zangerle, E. & Bauer, C. (2022). *Evaluating Recommender Systems: Survey and Framework*. ACM Computing Surveys. https://doi.org/10.1145/3556536
+3. Santhanam, K., Khattab, O., Saad-Falcon, J., Potts, C., & Zaharia, M. (2022). *ColBERTv2: Effective and Efficient Retrieval via Lightweight Late Interaction*. NAACL 2022. https://aclanthology.org/2022.naacl-main.272/
+4. Ni, J., Qu, C., Lu, J., Dai, Z., Abrego, G. H., Ma, J., Zhao, V., Luan, Y., Hall, K., Chang, M.-W., & Yang, Y. (2022). *Large Dual Encoders Are Generalizable Retrievers*. EMNLP 2022. https://aclanthology.org/2022.emnlp-main.669/
+5. Wang, L., Yang, N., Huang, X., Jiao, B., Yang, L., Jiang, D., Majumder, R., & Wei, F. (2022). *Text Embeddings by Weakly-Supervised Contrastive Pre-training (E5)*. arXiv:2212.03533. https://arxiv.org/abs/2212.03533
+6. Su, H., Shi, W., Kasai, J., Wang, Y., Hu, Y., Ostendorf, M., Yih, W.-t., Smith, N. A., Zettlemoyer, L., & Yu, T. (2023). *One Embedder, Any Task: Instruction-Finetuned Text Embeddings*. Findings of ACL 2023. https://aclanthology.org/2023.findings-acl.71/
+7. Gao, L., Ma, X., Lin, J., & Callan, J. (2023). *Precise Zero-Shot Dense Retrieval without Relevance Labels (HyDE)*. ACL 2023. https://aclanthology.org/2023.acl-long.99/
+8. Muennighoff, N., Tazi, N., Magne, L., & Reimers, N. (2023). *MTEB: Massive Text Embedding Benchmark*. EACL 2023. https://aclanthology.org/2023.eacl-main.148/
+9. Bauer, C., Zangerle, E., & Said, A. (2024). *Exploring the Landscape of Recommender Systems Evaluation: Practices and Perspectives*. ACM Transactions on Recommender Systems. https://doi.org/10.1145/3629170
+10. Yu, X., Zhang, J., & Yu, Z. (2024). *ConFit: Improving Resume-Job Matching using Data Augmentation and Contrastive Learning*. arXiv:2401.16349. https://arxiv.org/abs/2401.16349
+11. Chen, J., Xiao, S., Zhang, P., Luo, K., Lian, D., & Liu, Z. (2024). *M3-Embedding: Multi-Linguality, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation*. Findings of ACL 2024. https://aclanthology.org/2024.findings-acl.137/
+12. Lee, C., Roy, R., Xu, M., Raiman, J., Shoeybi, M., Catanzaro, B., & Ping, W. (2024). *NV-Embed: Improved Techniques for Training LLMs as Generalist Embedding Models*. arXiv:2405.17428. https://arxiv.org/abs/2405.17428
+13. Warner, B., Chaffin, A., Clavie, B., Weller, O., Hallstrom, O., Taghadouini, S., Gallagher, A., Biswas, R., Ladhak, F., Aarsen, T., Cooper, N., Adams, G., Howard, J., & Poli, I. (2024). *Smarter, Better, Faster, Longer: A Modern Bidirectional Encoder for Fast, Memory Efficient, and Long Context Finetuning and Inference (ModernBERT)*. arXiv:2412.13663. https://arxiv.org/abs/2412.13663
+14. Siafis, V., Rangoussi, M., & Psaromiligkos, Y. (2024). *Recommender Systems for Teachers: A Systematic Literature Review of Recent (2011-2023) Research*. Education Sciences, 14(7), 723. https://doi.org/10.3390/educsci14070723
+15. Celik Ertugrul, D., & Bitirim, S. (2025). *Job recommender systems: a systematic literature review, applications, open issues, and challenges*. Journal of Big Data, 12, 140. https://doi.org/10.1186/s40537-025-01173-y
+16. Yu, X., Xu, R., Xue, C., Zhang, J., Ma, X., & Yu, Z. (2025). *ConFit v2: Improving Resume-Job Matching using Hypothetical Resume Embedding and Runner-Up Hard-Negative Mining*. arXiv:2502.12361. https://arxiv.org/abs/2502.12361
+17. Rosenberger, J., Wolfrum, L., Weinzierl, S., Kraus, M., & Zschech, P. (2025). *CareerBERT: Matching resumes to ESCO jobs in a shared embedding space for generic job recommendations*. Expert Systems with Applications, 275, 127043. https://doi.org/10.1016/j.eswa.2025.127043
+18. Schellingerhout, R., Barile, F., & Tintarev, N. (2025). *OKRA: an Explainable, Heterogeneous, Multi-Stakeholder Job Recommender System*. arXiv:2504.07108. https://arxiv.org/abs/2504.07108
+19. Enevoldsen, K., Chung, I., Kerboua, I., Kardos, M., Mathur, A., Stap, D., Gala, J., Siblini, W., Krzeminski, D., Winata, G. I., et al. (2025). *MMTEB: Massive Multilingual Text Embedding Benchmark*. arXiv:2502.13595 (accepted at ICLR 2025). https://arxiv.org/abs/2502.13595
+20. Ajjam, M.-H., & Al-Raweshidy, H. S. (2026). *AI-driven semantic similarity-based job matching framework for recruitment systems*. Information Sciences, 724, 122728. https://doi.org/10.1016/j.ins.2025.122728
 
 ## Catatan Kuota 10-12
 
