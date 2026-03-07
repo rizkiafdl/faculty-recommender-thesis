@@ -1,0 +1,194 @@
+{% extends 'app_base.html' %}
+
+{% block content %}
+  <section class="content-grid-3">
+    <article class="panel reveal delay-1 span-2">
+      <h3>Select / Search Supervisor</h3>
+      <form method="get" action="{{ url_for('supervisors_page') }}" class="inline-form">
+        <label>
+          Searchable dropdown
+          <input
+            type="text"
+            name="pick"
+            list="supervisor-options"
+            value="{{ selected_supervisor.code ~ ' - ' ~ selected_supervisor.name if selected_supervisor else '' }}"
+            placeholder="Ketik kode atau nama dosen"
+            required
+          />
+          <datalist id="supervisor-options">
+            {% for item in supervisors %}
+              <option value="{{ item.code }} - {{ item.name }}"></option>
+            {% endfor %}
+          </datalist>
+        </label>
+        <button type="submit" class="accent">Load Supervisor</button>
+        <a href="{{ url_for('export_supervisor_config') }}" class="button-link">Export Config Excel</a>
+      </form>
+      <p class="muted">Keyword sekarang diketik satu-satu dalam bentuk chip warna-warni.</p>
+    </article>
+
+    <article class="panel reveal delay-2">
+      <h3>Add Supervisor</h3>
+      <form method="post" action="{{ url_for('add_supervisor') }}" class="stack-form">
+        <label>
+          Kode dosen
+          <input type="text" name="supervisor_code" placeholder="contoh: D9999" required />
+        </label>
+        <label>
+          Nama dosen
+          <input type="text" name="supervisor_name" placeholder="Nama lengkap dosen" required />
+        </label>
+        <label>
+          Keywords awal (pisah koma)
+          <input type="text" name="profile_keywords" placeholder="high gpa, network, entrepreneurship" />
+        </label>
+        <button type="submit" class="accent">Save Supervisor</button>
+      </form>
+    </article>
+  </section>
+
+  <section class="panel reveal delay-3">
+    <h3>Keywords Studio</h3>
+    <p class="muted">Keywords dipakai untuk konteks semantic matching. Ketik 1-1 lalu tekan <strong>Enter</strong> atau koma.</p>
+    {% if selected_supervisor %}
+      <form method="post" action="{{ url_for('update_keywords') }}" class="stack-form" id="keyword-form">
+        <input type="hidden" name="supervisor_code" value="{{ selected_supervisor.code }}" />
+        <input
+          type="hidden"
+          name="profile_keywords"
+          id="profile_keywords_hidden"
+          value="{{ selected_supervisor.profile_keywords }}"
+        />
+
+        <div class="keyword-input-row">
+          <label>
+            Add keyword
+            <input
+              type="text"
+              id="keyword-input"
+              list="keyword-options"
+              placeholder="contoh: high gpa"
+              autocomplete="off"
+            />
+            <datalist id="keyword-options">
+              {% for item in keyword_suggestions %}
+                <option value="{{ item }}"></option>
+              {% endfor %}
+            </datalist>
+          </label>
+          <button type="button" id="keyword-add-btn" class="accent">Add</button>
+        </div>
+
+        <div id="keyword-chip-box" class="keyword-chip-box"></div>
+
+        <button type="submit" class="accent">Save Keywords</button>
+      </form>
+
+      <script>
+        (function () {
+          const input = document.getElementById('keyword-input');
+          const addBtn = document.getElementById('keyword-add-btn');
+          const box = document.getElementById('keyword-chip-box');
+          const hidden = document.getElementById('profile_keywords_hidden');
+
+          if (!input || !addBtn || !box || !hidden) {
+            return;
+          }
+
+          const tokens = [];
+
+          function normalize(value) {
+            return String(value || '').trim().replace(/\s+/g, ' ');
+          }
+
+          function syncHidden() {
+            hidden.value = tokens.join(', ');
+          }
+
+          function exists(value) {
+            const target = value.toLowerCase();
+            return tokens.some((item) => item.toLowerCase() === target);
+          }
+
+          function addToken(raw) {
+            const parts = String(raw || '').split(',');
+            let added = false;
+            for (const part of parts) {
+              const value = normalize(part);
+              if (!value || exists(value)) {
+                continue;
+              }
+              tokens.push(value);
+              added = true;
+            }
+            if (added) {
+              render();
+            }
+          }
+
+          function removeToken(index) {
+            tokens.splice(index, 1);
+            render();
+          }
+
+          function render() {
+            box.innerHTML = '';
+            tokens.forEach((value, index) => {
+              const chip = document.createElement('button');
+              chip.type = 'button';
+              chip.className = `keyword-chip k${index % 6}`;
+              chip.textContent = `${value} x`;
+              chip.title = 'Klik untuk hapus';
+              chip.addEventListener('click', () => removeToken(index));
+              box.appendChild(chip);
+            });
+            syncHidden();
+          }
+
+          addBtn.addEventListener('click', () => {
+            addToken(input.value);
+            input.value = '';
+            input.focus();
+          });
+
+          input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ',') {
+              event.preventDefault();
+              addToken(input.value);
+              input.value = '';
+            }
+          });
+
+          addToken(hidden.value);
+          render();
+        })();
+      </script>
+    {% else %}
+      <p>Pilih dosen terlebih dahulu.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel reveal delay-4">
+    <h3>Supervisor Table</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Kode</th>
+            <th>Nama</th>
+            <th>Keywords</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in supervisors %}
+            <tr>
+              <td>{{ item.code }}</td>
+              <td>{{ item.name }}</td>
+              <td>{{ item.profile_keywords or '-' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

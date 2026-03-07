@@ -1,0 +1,67 @@
+{% extends 'app_base.html' %}
+
+{% block content %}
+  <section class="panel reveal delay-1">
+    <h3>Filters</h3>
+    <form method="get" action="{{ url_for('run_recommendations', run_id=run.id) }}" class="inline-form">
+      <label>
+        Search
+        <input type="text" name="q" value="{{ query }}" placeholder="student, partner, topic, dosen" />
+      </label>
+      <label>
+        Supervisor
+        <select name="supervisor_code">
+          <option value="">Semua supervisor</option>
+          {% for code, name in available_supervisors %}
+            <option value="{{ code }}" {{ 'selected' if code == supervisor_code_filter else '' }}>{{ code }} - {{ name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="checkbox-inline">
+        <input type="checkbox" name="mismatch" value="1" {{ 'checked' if mismatch_only else '' }} />
+        Mismatch only
+      </label>
+      <button type="submit" class="accent">Apply</button>
+      <a href="{{ url_for('run_recommendations', run_id=run.id) }}" class="button-link ghost">Reset</a>
+      <a href="{{ url_for('run_detail', run_id=run.id) }}" class="button-link">Back to Run</a>
+    </form>
+    <p class="muted">Showing {{ recommendation_count }} of {{ total_count }} rows.</p>
+  </section>
+
+  <section class="panel reveal delay-2">
+    <h3>Recommendation Table</h3>
+    <div class="table-wrap tall">
+      <table>
+        <thead>
+          <tr>
+            <th>Student ID</th>
+            <th>Nama</th>
+            <th>Track</th>
+            <th>Partner</th>
+            <th>Topik</th>
+            <th>Current Supervisor</th>
+            <th>Recommended Supervisor</th>
+            <th>Final Score</th>
+            <th>Rule Match</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in recommendations %}
+            {% set is_mismatch = (row.current_supervisor_code or '') and row.current_supervisor_code != row.recommended_supervisor_code %}
+            <tr class="{{ 'bad' if is_mismatch else '' }}">
+              <td>{{ row.student_id }}</td>
+              <td>{{ row.student_name }}</td>
+              <td>{{ row.track or '-' }}</td>
+              <td>{{ row.partner_lecturer or '-' }}</td>
+              <td>{{ row.position_topic or '-' }}</td>
+              <td>{{ row.current_supervisor_code or '-' }} {{ row.current_supervisor_name or '' }}</td>
+              <td>{{ row.recommended_supervisor_code }} {{ row.recommended_supervisor_name }}</td>
+              <td>{{ '%.3f'|format(row.final_score or 0.0) }}</td>
+              <td>{{ row.rule_matches or '-' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

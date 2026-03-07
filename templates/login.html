@@ -1,0 +1,30 @@
+{% extends 'auth_base.html' %}
+
+{% block content %}
+  <h1 class="auth-title">Welcome Back</h1>
+  <p class="auth-subtitle">Masuk ke studio rekomendasi dosen.</p>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <section class="messages">
+        {% for category, message in messages %}
+          <div class="message {{ category }}">{{ message }}</div>
+        {% endfor %}
+      </section>
+    {% endif %}
+  {% endwith %}
+
+  <form method="post" action="{{ url_for('login', next=request.args.get('next', '')) }}" class="stack-form">
+    <label>
+      Username
+      <input type="text" name="username" placeholder="username" required />
+    </label>
+    <label>
+      Password
+      <input type="password" name="password" placeholder="password" required />
+    </label>
+    <button type="submit" class="accent wide">Login</button>
+  </form>
+
+  <p class="auth-foot">Belum punya akun? <a href="{{ url_for('register') }}">Register sekarang</a>.</p>
+{% endblock %}

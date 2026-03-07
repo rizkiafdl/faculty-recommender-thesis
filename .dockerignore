@@ -1,0 +1,10 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+data
+node_modules
+skripsi_extract.txt

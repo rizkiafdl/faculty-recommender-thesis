@@ -1,0 +1,82 @@
+{% extends 'app_base.html' %}
+
+{% block content %}
+  {% set labeled_ratio = ((labeled_students / total_students) * 100) if total_students else 0 %}
+  <section class="metrics-grid">
+    <article class="metric-card panel reveal delay-1">
+      <span class="metric-label">Mahasiswa</span>
+      <strong class="metric-value">{{ total_students }}</strong>
+      <small>Total row student</small>
+    </article>
+    <article class="metric-card panel reveal delay-2">
+      <span class="metric-label">Labeled Supervisor</span>
+      <strong class="metric-value">{{ labeled_students }}</strong>
+      <small>{{ '%.1f'|format(labeled_ratio) }}% coverage</small>
+    </article>
+    <article class="metric-card panel reveal delay-3">
+      <span class="metric-label">Dosen Aktif</span>
+      <strong class="metric-value">{{ active_supervisors }}</strong>
+      <small>Scope assignment aktif</small>
+    </article>
+    <article class="metric-card panel reveal delay-4">
+      <span class="metric-label">Run Tersimpan</span>
+      <strong class="metric-value">{{ total_runs }}</strong>
+      <small>History di database</small>
+    </article>
+  </section>
+
+  <section class="content-grid-3">
+    <article class="panel reveal delay-1 span-2">
+      <h3>Database Condition</h3>
+      <div class="db-health-grid">
+        <div>
+          <span>Default source file</span>
+          <strong class="{{ 'ok-text' if default_source_exists else 'danger-text' }}">{{ 'Available' if default_source_exists else 'Missing' }}</strong>
+          <small><code>{{ default_excel_path }}</code></small>
+        </div>
+        <div>
+          <span>Label coverage</span>
+          <strong>{{ '%.1f'|format(labeled_ratio) }}%</strong>
+          <div class="progress-track">
+            <span class="progress-fill" style="width: {{ '%.2f'|format(labeled_ratio) }}%"></span>
+          </div>
+        </div>
+      </div>
+      <p class="muted">Sheet default otomatis: <code>{{ default_sheet_name }}</code>. Input sheet manual dihapus supaya alur lebih sederhana.</p>
+    </article>
+
+    <article class="panel reveal delay-2">
+      <h3>Pipeline Trigger</h3>
+      <p class="muted">Jalankan rekomendasi terbaru setelah import.</p>
+      <form method="post" action="{{ url_for('generate') }}">
+        <input type="hidden" name="next" value="{{ url_for('runs_history') }}" />
+        <button type="submit" class="accent">Generate New Run</button>
+      </form>
+      {% if latest_run %}
+        <hr class="soft-line" />
+        <small>Latest run: #{{ latest_run.id }} ({{ latest_run.created_at }})</small>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="content-grid">
+    <article class="panel reveal delay-3">
+      <h3>Import Default Excel</h3>
+      <p class="muted">Gunakan source path default tanpa memilih sheet manual.</p>
+      <form method="post" action="{{ url_for('import_default') }}" class="stack-form">
+        <button type="submit" class="accent">Import From Default Source</button>
+      </form>
+    </article>
+
+    <article class="panel reveal delay-4">
+      <h3>Upload Excel Baru</h3>
+      <form method="post" action="{{ url_for('import_upload') }}" enctype="multipart/form-data" class="stack-form">
+        <label>
+          File .xlsx
+          <input type="file" name="excel_file" accept=".xlsx" required />
+        </label>
+        <button type="submit" class="accent">Upload & Import</button>
+      </form>
+    </article>
+  </section>
+{% endblock %}

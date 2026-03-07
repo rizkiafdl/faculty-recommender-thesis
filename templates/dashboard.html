@@ -1,0 +1,121 @@
+{% extends 'app_base.html' %}
+
+{% block content %}
+  <section class="metrics-grid">
+    <article class="metric-card panel reveal delay-1">
+      <span class="metric-label">Total Mahasiswa</span>
+      <strong class="metric-value">{{ total_students }}</strong>
+      <small>Data aktif di database</small>
+    </article>
+
+    <article class="metric-card panel reveal delay-2">
+      <span class="metric-label">Dosen Aktif</span>
+      <strong class="metric-value">{{ active_supervisors }}</strong>
+      <small>Siap dipakai assignment</small>
+    </article>
+
+    <article class="metric-card panel reveal delay-3">
+      <span class="metric-label">Total Runs</span>
+      <strong class="metric-value">{{ total_runs }}</strong>
+      <small>Jejak histori eksekusi</small>
+    </article>
+
+    <article class="metric-card panel reveal delay-4">
+      <span class="metric-label">Latest Match Rate</span>
+      <strong class="metric-value">
+        {% if highlight_metrics.assignment_match is not none %}
+          {{ '%.3f'|format(highlight_metrics.assignment_match) }}
+        {% else %}
+          -
+        {% endif %}
+      </strong>
+      <small>assignment_match</small>
+    </article>
+  </section>
+
+  <section class="content-grid-3">
+    <article class="panel reveal delay-2 bi-board span-2">
+      <h3>Assignment Quality Trend (BI View)</h3>
+      <p class="muted">Perbandingan metrik antar run: <strong>match rate</strong>, <strong>hybrid MRR</strong>, <strong>content MRR</strong>.</p>
+      <div class="trend-legend">
+        <span><i class="dot dot-match"></i> Match Rate</span>
+        <span><i class="dot dot-hybrid"></i> Hybrid MRR</span>
+        <span><i class="dot dot-content"></i> Content MRR</span>
+      </div>
+      <div class="trend-list">
+        {% for item in run_rows|reverse %}
+          {% set match = ((item.assignment_match if item.assignment_match is not none else 0) * 100) %}
+          {% set hybrid = ((item.hybrid_mrr if item.hybrid_mrr is not none else 0) * 100) %}
+          {% set content = ((item.content_mrr if item.content_mrr is not none else 0) * 100) %}
+          <div class="trend-row">
+            <div class="trend-meta">#{{ item.id }}</div>
+            <div class="trend-bars">
+              <span class="bar bar-match" style="width: {{ '%.2f'|format(match) }}%"></span>
+              <span class="bar bar-hybrid" style="width: {{ '%.2f'|format(hybrid) }}%"></span>
+              <span class="bar bar-content" style="width: {{ '%.2f'|format(content) }}%"></span>
+            </div>
+            <div class="trend-values">
+              <small>M {{ '%.3f'|format(item.assignment_match or 0) }}</small>
+              <small>H {{ '%.3f'|format(item.hybrid_mrr or 0) }}</small>
+              <small>C {{ '%.3f'|format(item.content_mrr or 0) }}</small>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="panel reveal delay-3">
+      <h3>Latest Run Snapshot</h3>
+      {% if latest_run %}
+        <div class="kv-grid">
+          <div><span>ID</span><strong>#{{ latest_run.id }}</strong></div>
+          <div><span>Created</span><strong>{{ latest_run.created_at }}</strong></div>
+          <div><span>Solver</span><strong>{{ latest_run.solver_name or '-' }}</strong></div>
+          <div><span>Embedding</span><strong>{{ latest_run.embedding_model or '-' }}</strong></div>
+          <div><span>Objective</span><strong>{{ '%.3f'|format(latest_run.objective_score or 0.0) }}</strong></div>
+        </div>
+        <div class="actions-col compact">
+          <a class="button-link" href="{{ url_for('run_detail', run_id=latest_run.id) }}">Open Detail</a>
+          <a class="button-link ghost" href="{{ url_for('run_recommendations', run_id=latest_run.id) }}">Inspect Rows</a>
+          <a class="button-link ghost" href="{{ url_for('export_run', run_id=latest_run.id) }}">Export Excel</a>
+        </div>
+      {% else %}
+        <p>Belum ada run. Mulai dari Data Center lalu generate run baru.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="panel reveal delay-4">
+    <h3>Recent Runs</h3>
+    <div class="table-wrap short">
+      <table>
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Created</th>
+            <th>Solver</th>
+            <th>Model</th>
+            <th>Objective</th>
+            <th>Match Rate</th>
+            <th>Hybrid MRR</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in run_rows %}
+            <tr>
+              <td>#{{ item.id }}</td>
+              <td>{{ item.created_at }}</td>
+              <td>{{ item.solver_name or '-' }}</td>
+              <td>{{ item.embedding_model or '-' }}</td>
+              <td>{{ '%.3f'|format(item.objective_score or 0.0) }}</td>
+              <td>{{ '%.3f'|format(item.assignment_match or 0) if item.assignment_match is not none else '-' }}</td>
+              <td>{{ '%.3f'|format(item.hybrid_mrr or 0) if item.hybrid_mrr is not none else '-' }}</td>
+              <td><a href="{{ url_for('run_detail', run_id=item.id) }}">View</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

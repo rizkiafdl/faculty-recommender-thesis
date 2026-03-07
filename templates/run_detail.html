@@ -1,0 +1,147 @@
+{% extends 'app_base.html' %}
+
+{% block content %}
+  <section class="metrics-grid">
+    <article class="metric-card panel reveal delay-1">
+      <span class="metric-label">Run ID</span>
+      <strong class="metric-value">#{{ run.id }}</strong>
+      <small>{{ run.created_at }}</small>
+    </article>
+    <article class="metric-card panel reveal delay-2">
+      <span class="metric-label">Objective</span>
+      <strong class="metric-value">{{ '%.3f'|format(run.objective_score or 0.0) }}</strong>
+      <small>{{ run.solver_name or '-' }}</small>
+    </article>
+    <article class="metric-card panel reveal delay-3">
+      <span class="metric-label">Students</span>
+      <strong class="metric-value">{{ run.total_students }}</strong>
+      <small>Supervisors: {{ run.total_supervisors }}</small>
+    </article>
+    <article class="metric-card panel reveal delay-4">
+      <span class="metric-label">Mismatch Count</span>
+      <strong class="metric-value">{{ mismatch_count }}</strong>
+      <small>vs current_supervisor_code</small>
+    </article>
+  </section>
+
+  <section class="actions-row reveal delay-2">
+    <a class="button-link" href="{{ url_for('run_recommendations', run_id=run.id) }}">Open Recommendations</a>
+    <a class="button-link ghost" href="{{ url_for('export_run', run_id=run.id) }}">Export Excel</a>
+  </section>
+
+  {% if run.capacity_note %}
+    <section class="panel reveal delay-2">
+      <h3>Capacity Note</h3>
+      <pre>{{ run.capacity_note }}</pre>
+    </section>
+  {% endif %}
+
+  {% if run.solver_note %}
+    <section class="panel reveal delay-2">
+      <h3>Solver / Embedding Note</h3>
+      <pre>{{ run.solver_note }}</pre>
+    </section>
+  {% endif %}
+
+  <section class="content-grid">
+    <article class="panel reveal delay-3">
+      <h3>Evaluation</h3>
+      {% if evaluation %}
+        <div class="table-wrap short">
+          <table>
+            <thead>
+              <tr>
+                <th>Section</th>
+                <th>Metric</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for section, metrics in evaluation.items() %}
+                {% if metrics is mapping %}
+                  {% for metric, value in metrics.items() %}
+                    <tr>
+                      <td>{{ section }}</td>
+                      <td>{{ metric }}</td>
+                      <td>{{ value }}</td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td>meta</td>
+                    <td>{{ section }}</td>
+                    <td>{{ metrics }}</td>
+                  </tr>
+                {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p>Belum ada data evaluasi.</p>
+      {% endif %}
+    </article>
+
+    <article class="panel reveal delay-4">
+      <h3>Capacity Summary</h3>
+      <div class="table-wrap short">
+        <table>
+          <thead>
+            <tr>
+              <th>Kode</th>
+              <th>Dosen</th>
+              <th>Assigned</th>
+              <th>Min</th>
+              <th>Max</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in summary %}
+              <tr class="{{ 'ok' if row.within_capacity else 'bad' }}">
+                <td>{{ row.supervisor_code }}</td>
+                <td>{{ row.supervisor_name }}</td>
+                <td>{{ row.assigned_students }}</td>
+                <td>{{ row.min_capacity }}</td>
+                <td>{{ row.max_capacity }}</td>
+                <td>{{ 'OK' if row.within_capacity else 'Check' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="panel reveal delay-4">
+    <h3>Mismatch Spotlight (Top 10)</h3>
+    {% if mismatches %}
+      <div class="table-wrap short">
+        <table>
+          <thead>
+            <tr>
+              <th>Student ID</th>
+              <th>Nama</th>
+              <th>Current</th>
+              <th>Recommended</th>
+              <th>Rule Match</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in mismatches %}
+              <tr>
+                <td>{{ row.student_id }}</td>
+                <td>{{ row.student_name }}</td>
+                <td>{{ row.current_supervisor_code }} - {{ row.current_supervisor_name }}</td>
+                <td>{{ row.recommended_supervisor_code }} - {{ row.recommended_supervisor_name }}</td>
+                <td>{{ row.rule_matches or '-' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p>Tidak ada mismatch. Assignment match penuh.</p>
+    {% endif %}
+  </section>
+{% endblock %}

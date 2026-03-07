@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ page_title or 'Rekomendasi Dosen' }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <div class="app-shell">
+      <aside class="sidebar reveal">
+        <div class="brand">
+          <div class="brand-mark">RD</div>
+          <div>
+            <h1>Rekom Dosen</h1>
+            <p>Hybrid Assignment Studio</p>
+          </div>
+        </div>
+
+        <nav class="nav-menu">
+          <a class="nav-link {{ 'active' if request.endpoint == 'dashboard' else '' }}" href="{{ url_for('dashboard') }}">Dashboard</a>
+          <a class="nav-link {{ 'active' if request.endpoint in ['data_center'] else '' }}" href="{{ url_for('data_center') }}">Data Center</a>
+          <a class="nav-link {{ 'active' if request.endpoint in ['runs_history', 'run_detail', 'run_recommendations'] else '' }}" href="{{ url_for('runs_history') }}">Run History</a>
+          <a class="nav-link {{ 'active' if request.endpoint in ['supervisors_page'] else '' }}" href="{{ url_for('supervisors_page') }}">Supervisor Studio</a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="user-box">
+            <div class="label">Signed in</div>
+            <div class="name">{{ current_user.full_name or current_user.username }}</div>
+          </div>
+          <form method="post" action="{{ url_for('logout') }}">
+            <button type="submit" class="ghost danger">Logout</button>
+          </form>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar reveal delay-1">
+          <div>
+            <h2>{{ page_title or 'Rekomendasi Dosen Pembimbing' }}</h2>
+            {% if page_subtitle %}<p>{{ page_subtitle }}</p>{% endif %}
+          </div>
+          <form method="post" action="{{ url_for('generate') }}" class="quick-generate">
+            <input type="hidden" name="next" value="{{ url_for('runs_history') }}" />
+            <button type="submit" class="accent">Generate New Run</button>
+          </form>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <section class="messages reveal delay-1">
+              {% for category, message in messages %}
+                <div class="message {{ category }}">{{ message }}</div>
+              {% endfor %}
+            </section>
+          {% endif %}
+        {% endwith %}
+
+        <section class="content-area">
+          {% block content %}{% endblock %}
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,38 @@
+{% extends 'auth_base.html' %}
+
+{% block content %}
+  <h1 class="auth-title">Create Account</h1>
+  <p class="auth-subtitle">Buat akun untuk mengelola assignment dan kategori dosen.</p>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <section class="messages">
+        {% for category, message in messages %}
+          <div class="message {{ category }}">{{ message }}</div>
+        {% endfor %}
+      </section>
+    {% endif %}
+  {% endwith %}
+
+  <form method="post" action="{{ url_for('register') }}" class="stack-form">
+    <label>
+      Nama Lengkap
+      <input type="text" name="full_name" placeholder="Nama lengkap" />
+    </label>
+    <label>
+      Username
+      <input type="text" name="username" placeholder="username" required />
+    </label>
+    <label>
+      Password
+      <input type="password" name="password" placeholder="minimal 6 karakter" required />
+    </label>
+    <label>
+      Konfirmasi Password
+      <input type="password" name="confirm_password" placeholder="ulangi password" required />
+    </label>
+    <button type="submit" class="accent wide">Register</button>
+  </form>
+
+  <p class="auth-foot">Sudah punya akun? <a href="{{ url_for('login') }}">Login</a>.</p>
+{% endblock %}
