@@ -7,3 +7,5 @@ data/
 skripsi_extract.txt
 skripsi.pdf
 .env
+.context
+CLAUDE.md

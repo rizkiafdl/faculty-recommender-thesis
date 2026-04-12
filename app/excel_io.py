@@ -8,25 +8,30 @@ from typing import Any
 import pandas as pd
 
 
-CANONICAL_COLUMNS = {
-    "BINUSIAN ID": "binusian_id",
+REQUIRED_COLUMNS: dict[str, str] = {
     "STUDENT ID": "student_id",
+    "TRACK": "track",
+    "PARTNER/LECTURER": "partner_lecturer",
+    "POSITION/TOPIC": "position_topic",
+    "WORK SCHEMA": "work_schema",
+    "GPA": "gpa",
+}
+
+OPTIONAL_COLUMNS: dict[str, str] = {
+    "BINUSIAN ID": "binusian_id",
     "STUDENT NAME": "name",
     "STUDENT EMAIL": "email",
     "STUDENT PHONE": "phone",
-    "TRACK": "track",
-    "GPA": "gpa",
     "TOTAL SKS": "total_sks",
-    "PARTNER/LECTURER": "partner_lecturer",
-    "POSITION/TOPIC": "position_topic",
     "DURATION": "duration",
     "JOB START DATE": "job_start_date",
     "JOB END DATE": "job_end_date",
-    "WORK SCHEMA": "work_schema",
     "ENROLLMENT STATUS": "enrollment_status",
     "kode dosen": "current_supervisor_code",
     "FS": "current_supervisor_name",
 }
+
+CANONICAL_COLUMNS: dict[str, str] = {**REQUIRED_COLUMNS, **OPTIONAL_COLUMNS}
 
 
 def _clean_id(value: Any) -> str | None:
@@ -82,7 +87,7 @@ def _read_dataframe_from_bytes(content: bytes, sheet_name: str) -> pd.DataFrame:
 
 
 def _normalize_dataframe(df: pd.DataFrame) -> list[dict]:
-    missing = [column for column in CANONICAL_COLUMNS if column not in df.columns]
+    missing = [column for column in REQUIRED_COLUMNS if column not in df.columns]
     if missing:
         raise ValueError(f"Kolom wajib tidak ditemukan: {missing}")
 

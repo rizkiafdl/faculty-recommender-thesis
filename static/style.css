@@ -879,3 +879,50 @@ pre {
     font-size: 0.8rem;
   }
 }
+
+/* ── Benchmark page ──────────────────────────────────────── */
+.spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid var(--border);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.winner-banner {
+  background: #e8f7f1;
+  border: 1px solid #0c8a5a;
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+  color: #0c8a5a;
+  font-weight: 600;
+}
+
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  background: var(--border);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.rank-badge.gold {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.inline-form.stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}

@@ -11,7 +11,6 @@ from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import Session, selectinload
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.benchmark import benchmark_transformer_models
 from app.config import DEFAULT_SHEET_NAME, TARGET_MAX_CAPACITY, TARGET_MIN_CAPACITY
 from app.database import Base, engine
 from app.evaluation import build_evaluation_payload
@@ -854,28 +853,6 @@ def evaluation_by_run(session: Session, run_id: int | None = None) -> tuple[Reco
     if not isinstance(payload, dict):
         payload = {}
     return run, payload
-
-
-def benchmark_models(
-    session: Session,
-    model_names: list[str] | None = None,
-    device: str | None = None,
-) -> dict[str, Any]:
-    seed_supervisors(session)
-    student_payload = _students_for_recommender(session)
-    if not student_payload:
-        raise ValueError("Belum ada data mahasiswa. Import Excel terlebih dahulu.")
-
-    profiles = _supervisor_profiles_from_db(session)
-    if not profiles:
-        raise ValueError("Belum ada data dosen aktif.")
-
-    return benchmark_transformer_models(
-        students=student_payload,
-        supervisor_profiles=tuple(profiles),
-        model_names=model_names,
-        device=device,
-    )
 
 
 def export_recommendations_excel(

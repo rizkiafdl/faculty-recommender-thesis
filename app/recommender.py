@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,8 +9,6 @@ from app.embedding import get_embedding_provider
 from app.config import (
     CAPACITY_PRIORITY_CODES,
     COMPANY_GROUP_BONUS,
-    CONTEXT_PRIOR_MIN_SUPPORT,
-    CONTEXT_PRIOR_WEIGHT,
     LABELED_STUDENT_PRIORITY_WEIGHT,
     SIMILARITY_WEIGHT,
     TARGET_MAX_CAPACITY,
@@ -25,13 +22,6 @@ from app.rules import (
     profile_document,
     student_document,
 )
-
-try:
-    import pulp
-
-    HAS_PULP = True
-except Exception:  # pragma: no cover
-    HAS_PULP = False
 
 
 @dataclass
@@ -172,98 +162,6 @@ def _context_token(value: object) -> str:
     return text if text else "__none__"
 
 
-def _context_views(student: dict[str, Any]) -> list[tuple[str, str]]:
-    track = _context_token(student.get("track"))
-    partner = _context_token(student.get("partner_lecturer"))
-    topic = _context_token(student.get("position_topic"))
-    schema = _context_token(student.get("work_schema"))
-    return [
-        ("exact", f"{track}|{partner}|{topic}|{schema}"),
-        ("partner_topic", f"{track}|{partner}|{topic}"),
-        ("partner", f"{track}|{partner}"),
-        ("topic", f"{track}|{topic}"),
-        ("track", track),
-    ]
-
-
-def _build_context_prior_boost(
-    students: list[dict[str, Any]],
-    supervisor_codes: list[str],
-    base_weight: float = CONTEXT_PRIOR_WEIGHT,
-    min_support: int = CONTEXT_PRIOR_MIN_SUPPORT,
-) -> tuple[np.ndarray, dict[tuple[int, int], list[str]]]:
-    matrix = np.zeros((len(students), len(supervisor_codes)), dtype=float)
-    reasons: dict[tuple[int, int], list[str]] = {}
-    if not students or not supervisor_codes or base_weight <= 0:
-        return matrix, reasons
-
-    code_to_idx = {code: idx for idx, code in enumerate(supervisor_codes)}
-    level_weights = {
-        "exact": 1.7 * base_weight,
-        "partner_topic": 1.3 * base_weight,
-        "partner": 0.9 * base_weight,
-        "topic": 0.7 * base_weight,
-        "track": 0.5 * base_weight,
-    }
-    level_min_support = {
-        "exact": max(3, min_support + 1),
-        "partner_topic": max(3, min_support),
-        "partner": max(2, min_support - 1),
-        "topic": max(2, min_support - 1),
-        "track": max(2, min_support - 1),
-    }
-
-    counts: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: defaultdict(Counter))
-    totals: dict[str, dict[str, int]] = defaultdict(dict)
-
-    for student in students:
-        code = str(student.get("current_supervisor_code") or "").strip()
-        if code not in code_to_idx:
-            continue
-        for level, key in _context_views(student):
-            counts[level][key][code] += 1
-
-    for level, group_map in counts.items():
-        for key, counter in group_map.items():
-            totals[level][key] = int(sum(counter.values()))
-
-    for student_idx, student in enumerate(students):
-        own_code = str(student.get("current_supervisor_code") or "").strip()
-        for level, key in _context_views(student):
-            group_counter = counts.get(level, {}).get(key)
-            group_total = totals.get(level, {}).get(key, 0)
-            if not group_counter or group_total <= 0:
-                continue
-
-            adjusted_total = group_total
-            if own_code in code_to_idx and group_counter.get(own_code, 0) > 0:
-                adjusted_total -= 1
-            if adjusted_total < level_min_support[level]:
-                continue
-
-            support_scale = min(1.0, adjusted_total / float(level_min_support[level] + 3))
-            weight = level_weights[level]
-            for code, count in group_counter.items():
-                if code not in code_to_idx:
-                    continue
-                adjusted_count = count
-                if own_code == code and adjusted_count > 0:
-                    adjusted_count -= 1
-                if adjusted_count <= 0:
-                    continue
-
-                ratio = adjusted_count / adjusted_total
-                boost = weight * ratio * support_scale
-                col = code_to_idx[code]
-                matrix[student_idx, col] += boost
-
-                if ratio >= 0.33:
-                    reasons.setdefault((student_idx, col), []).append(
-                        f"Historical context prior ({level}: {adjusted_count}/{adjusted_total})"
-                    )
-
-    return matrix, reasons
-
 
 def _apply_company_group_bonus(
     score_matrix: np.ndarray,
@@ -308,50 +206,11 @@ def _apply_company_group_bonus(
     return group_bonus, student_company_key
 
 
-def _solve_assignment_with_pulp(
-    score_matrix: np.ndarray,
-    min_caps: list[int],
-    max_caps: list[int],
-) -> tuple[np.ndarray, float]:
-    if not HAS_PULP:
-        raise RuntimeError("PuLP is not installed")
-
-    student_count, supervisor_count = score_matrix.shape
-    problem = pulp.LpProblem("faculty_supervisor_assignment", pulp.LpMaximize)
-    x = {
-        (i, j): pulp.LpVariable(f"x_{i}_{j}", cat="Binary")
-        for i in range(student_count)
-        for j in range(supervisor_count)
-    }
-
-    problem += pulp.lpSum(score_matrix[i, j] * x[(i, j)] for i in range(student_count) for j in range(supervisor_count))
-
-    for i in range(student_count):
-        problem += pulp.lpSum(x[(i, j)] for j in range(supervisor_count)) == 1
-
-    for j in range(supervisor_count):
-        problem += pulp.lpSum(x[(i, j)] for i in range(student_count)) >= min_caps[j]
-        problem += pulp.lpSum(x[(i, j)] for i in range(student_count)) <= max_caps[j]
-
-    status = problem.solve(pulp.PULP_CBC_CMD(msg=False))
-    if status != pulp.LpStatusOptimal:
-        raise RuntimeError(f"PuLP solver gagal: {pulp.LpStatus[status]}")
-
-    assignment = np.full(student_count, -1, dtype=int)
-    for i in range(student_count):
-        for j in range(supervisor_count):
-            value = pulp.value(x[(i, j)])
-            if value is not None and value > 0.5:
-                assignment[i] = j
-                break
-        if assignment[i] < 0:
-            raise RuntimeError(f"Mahasiswa index {i} tidak ter-assign")
-
-    objective = float(pulp.value(problem.objective))
-    return assignment, objective
-
-
-def _solve_assignment_greedy(
+# Greedy solver is used as the primary assignment strategy.
+# For the scale of this system (~100-200 students, ~14 supervisors),
+# greedy produces near-optimal results without requiring an external
+# ILP solver dependency, making it simpler to maintain and explain.
+def _solve_assignment(
     score_matrix: np.ndarray,
     min_caps: list[int],
     max_caps: list[int],
@@ -440,12 +299,7 @@ def generate_recommendations(
             if reasons:
                 reasons_map[(i, j)] = reasons
 
-    context_boost, context_reasons = _build_context_prior_boost(
-        students=students,
-        supervisor_codes=supervisor_codes,
-    )
-
-    score_matrix = weighted_similarity + rule_boost + context_boost
+    score_matrix = weighted_similarity + rule_boost
     group_boost, student_company = _apply_company_group_bonus(score_matrix, students)
     score_matrix = score_matrix + group_boost
 
@@ -462,29 +316,12 @@ def generate_recommendations(
     )
 
     solver_note: str | None = None
-    solver_name = "pulp" if HAS_PULP else "greedy"
-    if HAS_PULP:
-        try:
-            assignment, objective = _solve_assignment_with_pulp(
-                score_matrix=optimization_score_matrix,
-                min_caps=capacity_plan.min_caps,
-                max_caps=capacity_plan.max_caps,
-            )
-        except Exception as exc:
-            solver_name = "greedy"
-            solver_note = f"PuLP gagal, fallback ke greedy: {exc}"
-            assignment, objective = _solve_assignment_greedy(
-                score_matrix=optimization_score_matrix,
-                min_caps=capacity_plan.min_caps,
-                max_caps=capacity_plan.max_caps,
-            )
-    else:
-        solver_note = "PuLP tidak tersedia, menggunakan greedy fallback."
-        assignment, objective = _solve_assignment_greedy(
-            score_matrix=optimization_score_matrix,
-            min_caps=capacity_plan.min_caps,
-            max_caps=capacity_plan.max_caps,
-        )
+    solver_name = "greedy"
+    assignment, objective = _solve_assignment(
+        score_matrix=optimization_score_matrix,
+        min_caps=capacity_plan.min_caps,
+        max_caps=capacity_plan.max_caps,
+    )
 
     counts_by_supervisor: dict[str, int] = {code: 0 for code in supervisor_codes}
     items: list[RecommendationItem] = []
@@ -494,7 +331,6 @@ def generate_recommendations(
         counts_by_supervisor[profile.code] += 1
 
         reasons = list(reasons_map.get((student_idx, int(supervisor_idx)), []))
-        reasons.extend(context_reasons.get((student_idx, int(supervisor_idx)), []))
         if group_boost[student_idx, int(supervisor_idx)] > 0:
             reasons.append("Company cohort alignment")
         if not reasons:

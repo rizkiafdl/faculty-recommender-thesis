@@ -18,8 +18,6 @@ TARGET_MAX_CAPACITY = int(os.getenv("TARGET_MAX_CAPACITY", "12"))
 SIMILARITY_WEIGHT = float(os.getenv("SIMILARITY_WEIGHT", "2.0"))
 COMPANY_GROUP_BONUS = float(os.getenv("COMPANY_GROUP_BONUS", "1.5"))
 HIGH_GPA_THRESHOLD = float(os.getenv("HIGH_GPA_THRESHOLD", "3.8"))
-CONTEXT_PRIOR_WEIGHT = float(os.getenv("CONTEXT_PRIOR_WEIGHT", "0.0"))
-CONTEXT_PRIOR_MIN_SUPPORT = int(os.getenv("CONTEXT_PRIOR_MIN_SUPPORT", "3"))
 CURRENT_SUPERVISOR_CONTINUITY_WEIGHT = float(
     os.getenv("CURRENT_SUPERVISOR_CONTINUITY_WEIGHT", "12.0")
 )
@@ -32,21 +30,6 @@ EMBEDDING_FALLBACK_MODEL_NAME = os.getenv(
     "sentence-transformers/all-mpnet-base-v2",
 )
 EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "auto")
-BENCHMARK_MODEL_NAMES = [
-    model_name.strip()
-    for model_name in os.getenv(
-        "BENCHMARK_MODEL_NAMES",
-        ",".join(
-            [
-                "answerdotai/ModernBERT-base",
-                "sentence-transformers/all-mpnet-base-v2",
-                "sentence-transformers/all-MiniLM-L6-v2",
-            ]
-        ),
-    ).split(",")
-    if model_name.strip()
-]
-
 # Supervisors that are considered more flexible for overflow/underflow handling.
 CAPACITY_PRIORITY_CODES = [
     "D2211",  # Dr. Abdul Haris Rangkuti
