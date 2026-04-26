@@ -9,7 +9,6 @@ from app.embedding import get_embedding_provider
 from app.config import (
     CAPACITY_PRIORITY_CODES,
     COMPANY_GROUP_BONUS,
-    LABELED_STUDENT_PRIORITY_WEIGHT,
     SIMILARITY_WEIGHT,
     TARGET_MAX_CAPACITY,
     TARGET_MIN_CAPACITY,
@@ -303,13 +302,6 @@ def generate_recommendations(
     group_boost, student_company = _apply_company_group_bonus(score_matrix, students)
     score_matrix = score_matrix + group_boost
 
-    optimization_score_matrix = np.array(score_matrix, copy=True)
-    if LABELED_STUDENT_PRIORITY_WEIGHT > 1.0:
-        for i, student in enumerate(students):
-            current_code = str(student.get("current_supervisor_code") or "").strip()
-            if current_code:
-                optimization_score_matrix[i, :] *= LABELED_STUDENT_PRIORITY_WEIGHT
-
     capacity_plan = _build_capacity_plan(
         supervisor_codes=supervisor_codes,
         student_count=student_count,
@@ -318,7 +310,7 @@ def generate_recommendations(
     solver_note: str | None = None
     solver_name = "greedy"
     assignment, objective = _solve_assignment(
-        score_matrix=optimization_score_matrix,
+        score_matrix=score_matrix,
         min_caps=capacity_plan.min_caps,
         max_caps=capacity_plan.max_caps,
     )

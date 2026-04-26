@@ -6,7 +6,6 @@ from typing import Iterable
 
 from app.config import (
     CAPACITY_PRIORITY_CODES,
-    CURRENT_SUPERVISOR_CONTINUITY_WEIGHT,
     HIGH_GPA_THRESHOLD,
 )
 
@@ -542,19 +541,7 @@ def evaluate_rule_boost(student: dict, profile: SupervisorProfile) -> tuple[floa
         boost += fallback_boost
         reasons.append("Flexible fallback matching")
 
-    if (
-        CURRENT_SUPERVISOR_CONTINUITY_WEIGHT > 0
-        and current_supervisor_code
-        and current_supervisor_code == profile.code
-    ):
-        continuity_boost = CURRENT_SUPERVISOR_CONTINUITY_WEIGHT
-        if internship and "internship" in profile_labels:
-            continuity_boost += 0.35
-        if research and "research" in profile_labels:
-            continuity_boost += 0.35
-        boost += continuity_boost
-        reasons.append("Continuity with current supervisor")
-    elif not current_supervisor_code and profile.code in CAPACITY_PRIORITY_CODES:
+    if not current_supervisor_code and profile.code in CAPACITY_PRIORITY_CODES:
         boost += 0.9
         reasons.append("Unlabeled overflow routing")
 
