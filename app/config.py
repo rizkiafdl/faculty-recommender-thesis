@@ -15,13 +15,9 @@ DEFAULT_SHEET_NAME = os.getenv("DEFAULT_SHEET_NAME", "Sheet1")
 
 TARGET_MIN_CAPACITY = int(os.getenv("TARGET_MIN_CAPACITY", "10"))
 TARGET_MAX_CAPACITY = int(os.getenv("TARGET_MAX_CAPACITY", "12"))
-SIMILARITY_WEIGHT = float(os.getenv("SIMILARITY_WEIGHT", "2.0"))
+SIMILARITY_WEIGHT = float(os.getenv("SIMILARITY_WEIGHT", "1.0"))
 COMPANY_GROUP_BONUS = float(os.getenv("COMPANY_GROUP_BONUS", "1.5"))
 HIGH_GPA_THRESHOLD = float(os.getenv("HIGH_GPA_THRESHOLD", "3.8"))
-CURRENT_SUPERVISOR_CONTINUITY_WEIGHT = float(
-    os.getenv("CURRENT_SUPERVISOR_CONTINUITY_WEIGHT", "12.0")
-)
-LABELED_STUDENT_PRIORITY_WEIGHT = float(os.getenv("LABELED_STUDENT_PRIORITY_WEIGHT", "2.0"))
 
 # Transformer embedding settings (content-based recommendation).
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "answerdotai/ModernBERT-base")
