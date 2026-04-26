@@ -611,5 +611,15 @@ def export_supervisor_config_legacy():
     return redirect(url_for("export_supervisor_config"))
 
 
+@app.route("/benchmark", methods=["GET"])
+@login_required
+def benchmark_page():
+    return render_template(
+        "benchmark.html",
+        page_title="Benchmark",
+        page_subtitle="Evaluation metrics and model comparison.",
+    )
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True, use_reloader=False)
