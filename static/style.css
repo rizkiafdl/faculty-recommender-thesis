@@ -926,3 +926,30 @@ pre {
   align-items: flex-start;
   gap: 1rem;
 }
+
+.pipeline-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.pipeline-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.pipeline-badge.badge-on {
+  background: #e8f8de;
+  color: #1f5c25;
+  border: 1px solid #b4e2a0;
+}
+
+.pipeline-badge.badge-off {
+  background: #f2f2f2;
+  color: #999;
+  border: 1px solid #ddd;
+}

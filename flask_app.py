@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from app.config import DEFAULT_EXCEL_PATH, DEFAULT_SHEET_NAME
 from app.database import SessionLocal
 from app.models import RecommendationRun, Student, Supervisor
+from app.embedding import get_label_embedding_cache  # noqa: F401 — ensures tables created
 from app.services import (
     add_or_update_supervisor,
     assign_supervisor_category,
@@ -27,9 +28,18 @@ from app.services import (
     init_db,
     list_recommendations,
     list_runs,
+    list_students_for_preview,
     list_supervisor_profiles_for_web,
+    load_affinity_matrix_for_web,
+    load_label_descriptions,
     register_user,
     remove_supervisor_category,
+    reset_affinity_matrix,
+    reset_label_description,
+    save_affinity_cells,
+    save_label_description,
+    seed_affinity_matrix,
+    seed_label_descriptions,
     seed_supervisors,
     summary_by_supervisor,
     update_supervisor_keywords,
@@ -44,6 +54,8 @@ def bootstrap() -> None:
     init_db()
     with SessionLocal() as session:
         seed_supervisors(session)
+        seed_label_descriptions(session)
+        seed_affinity_matrix(session)
 
 
 bootstrap()
@@ -99,6 +111,17 @@ def _evaluation_payload_from_run(run) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _pipeline_config_from_run(run) -> dict[str, object]:
+    raw = getattr(run, "pipeline_config_json", None)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _run_metric_row(run) -> dict[str, object]:
     payload = _evaluation_payload_from_run(run)
     return {
@@ -110,6 +133,7 @@ def _run_metric_row(run) -> dict[str, object]:
         "assignment_match": _metric_value(payload, "assignment_match", "match_rate"),
         "hybrid_mrr": _metric_value(payload, "hybrid_score", "mrr"),
         "content_mrr": _metric_value(payload, "content_based", "mrr"),
+        "pipeline_config": _pipeline_config_from_run(run),
     }
 
 
@@ -222,6 +246,7 @@ def dashboard():
         "hybrid_mrr": latest_metrics.get("hybrid_mrr"),
         "content_mrr": latest_metrics.get("content_mrr"),
     }
+    pipeline_config_latest = _pipeline_config_from_run(latest_run) if latest_run else {}
 
     return render_template(
         "dashboard.html",
@@ -234,6 +259,7 @@ def dashboard():
         active_supervisors=active_supervisors,
         total_runs=total_runs if total_runs else len(run_rows),
         highlight_metrics=highlight_metrics,
+        pipeline_config_latest=pipeline_config_latest,
     )
 
 
@@ -333,7 +359,7 @@ def import_upload():
 
     return redirect(url_for("data_center"))
 
-
+#Generate Recomendation logic
 @app.route("/generate", methods=["POST"])
 @login_required
 def generate():
@@ -350,21 +376,7 @@ def generate():
         return redirect(next_url or url_for("data_center"))
 
 
-@app.route("/runs", methods=["GET"])
-@login_required
-def runs_history():
-    with SessionLocal() as session:
-        runs = list_runs(session=session, limit=250)
-    run_rows = [_run_metric_row(run) for run in runs]
-    return render_template(
-        "runs.html",
-        page_title="Run History",
-        page_subtitle="Track every execution and jump straight to analysis pages.",
-        runs=runs,
-        run_rows=run_rows,
-    )
-
-
+#Detail run page render & logic.
 @app.route("/runs/<int:run_id>", methods=["GET"])
 @login_required
 def run_detail(run_id: int):
@@ -379,6 +391,7 @@ def run_detail(run_id: int):
         if (row.get("current_supervisor_code") or "").strip()
         and row.get("current_supervisor_code") != row.get("recommended_supervisor_code")
     ]
+    pipeline_config = _pipeline_config_from_run(run)
 
     return render_template(
         "run_detail.html",
@@ -389,9 +402,10 @@ def run_detail(run_id: int):
         evaluation=evaluation,
         mismatches=mismatches[:10],
         mismatch_count=len(mismatches),
+        pipeline_config=pipeline_config,
     )
 
-
+#Run History Page Renderer & Logic Route.
 @app.route("/runs/<int:run_id>/recommendations", methods=["GET"])
 @login_required
 def run_recommendations(run_id: int):
@@ -447,7 +461,7 @@ def run_recommendations(run_id: int):
         mismatch_only=mismatch_only,
     )
 
-
+#Download type shit
 @app.route("/runs/<int:run_id>/export", methods=["GET"])
 @login_required
 def export_run(run_id: int):
@@ -471,6 +485,19 @@ def export_run(run_id: int):
 def export_legacy(run_id: int):
     return redirect(url_for("export_run", run_id=run_id))
 
+@app.route("/runs", methods=["GET"])
+@login_required
+def runs_history():
+    with SessionLocal() as session:
+        runs = list_runs(session=session, limit=250)
+    run_rows = [_run_metric_row(run) for run in runs]
+    return render_template(
+        "runs.html",
+        page_title="Run History",
+        page_subtitle="Track every execution and jump straight to analysis pages.",
+        runs=runs,
+        run_rows=run_rows,
+    )
 
 @app.route("/supervisors", methods=["GET"])
 @login_required
@@ -619,6 +646,143 @@ def benchmark_page():
         page_title="Benchmark",
         page_subtitle="Evaluation metrics and model comparison.",
     )
+
+
+@app.route("/rules", methods=["GET"])
+@login_required
+def rules_studio():
+    with SessionLocal() as session:
+        label_descriptions = load_label_descriptions(session)
+        supervisors = list_supervisor_profiles_for_web(session)
+        students_preview = list_students_for_preview(session)
+        affinity_grid = load_affinity_matrix_for_web(session, supervisors)
+    niche_labels = {ld["label_name"] for ld in label_descriptions if ld["is_niche"]}
+    return render_template(
+        "rules_studio.html",
+        page_title="Rules Studio",
+        page_subtitle="Configure semantic label detection and supervisor affinity weights.",
+        label_descriptions=label_descriptions,
+        supervisors=supervisors,
+        students_preview=students_preview,
+        affinity_grid=affinity_grid,
+        niche_labels=niche_labels,
+    )
+
+
+@app.route("/rules/labels/update", methods=["POST"])
+@login_required
+def update_label_description():
+    label_name = request.form.get("label_name", "").strip()
+    description = request.form.get("description", "").strip()
+    threshold_raw = request.form.get("threshold", "0.45")
+    is_niche = request.form.get("is_niche") in {"on", "true", "1"}
+    try:
+        threshold = float(threshold_raw)
+        if not (0.0 < threshold < 1.0):
+            raise ValueError("Threshold harus antara 0 dan 1.")
+        if not description:
+            raise ValueError("Deskripsi label tidak boleh kosong.")
+        with SessionLocal() as session:
+            save_label_description(session, label_name, description, threshold, is_niche)
+        get_label_embedding_cache().invalidate(label_name)
+        flash(f"Label '{label_name}' berhasil disimpan.", "success")
+    except Exception as exc:
+        flash(f"Gagal simpan label: {exc}", "error")
+    return redirect(url_for("rules_studio"))
+
+
+@app.route("/rules/labels/reset", methods=["POST"])
+@login_required
+def reset_label_description_route():
+    label_name = request.form.get("label_name", "").strip()
+    try:
+        with SessionLocal() as session:
+            reset_label_description(session, label_name)
+        get_label_embedding_cache().invalidate(label_name)
+        flash(f"Label '{label_name}' direset ke default.", "success")
+    except Exception as exc:
+        flash(f"Gagal reset label: {exc}", "error")
+    return redirect(url_for("rules_studio"))
+
+
+@app.route("/rules/labels/preview", methods=["GET"])
+@login_required
+def preview_label_score():
+    from app.models import Student as StudentModel
+    from app.rules import student_document
+
+    label_name = request.args.get("label_name", "").strip()
+    student_id = request.args.get("student_id", "").strip()
+    description = request.args.get("description", "").strip()
+
+    if not label_name or not student_id or not description:
+        return {"error": "label_name, student_id, dan description wajib diisi."}, 400
+
+    try:
+        with SessionLocal() as session:
+            student = session.execute(
+                select(StudentModel).where(StudentModel.student_id == student_id)
+            ).scalars().first()
+            if student is None:
+                return {"error": f"Mahasiswa {student_id} tidak ditemukan."}, 404
+            student_snap = {
+                "track": student.track,
+                "partner_lecturer": student.partner_lecturer,
+                "position_topic": student.position_topic,
+                "work_schema": student.work_schema,
+                "name": student.name,
+            }
+
+        from app.embedding import get_embedding_provider as _get_provider
+        provider = _get_provider()
+        cache = get_label_embedding_cache()
+        student_text = student_document(student_snap)
+        student_vecs = provider.encode_batch([student_text])
+        if student_vecs is None:
+            return {"error": "Model embedding tidak tersedia; tidak bisa preview."}, 503
+
+        label_vec = cache.get_or_compute(label_name, description, provider)
+        if label_vec is None:
+            return {"error": "Gagal compute label embedding."}, 503
+
+        import numpy as np
+        score = float(np.dot(student_vecs[0], label_vec))
+
+        return {
+            "label_name": label_name,
+            "student_id": student_id,
+            "student_name": student_snap["name"],
+            "score": round(score, 4),
+            "description": description,
+        }
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+
+
+@app.route("/rules/affinity/update", methods=["POST"])
+@login_required
+def update_affinity_cells():
+    try:
+        cells = request.get_json(force=True)
+        if not isinstance(cells, list):
+            return {"error": "Expected JSON array."}, 400
+        with SessionLocal() as session:
+            save_affinity_cells(session, cells)
+        return {"ok": True, "updated": len(cells)}
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+
+
+@app.route("/rules/affinity/reset", methods=["POST"])
+@login_required
+def reset_affinity_matrix_route():
+    try:
+        with SessionLocal() as session:
+            reset_affinity_matrix(session)
+        flash("Affinity matrix direset ke default.", "success")
+    except Exception as exc:
+        flash(f"Gagal reset: {exc}", "error")
+    return redirect(url_for("rules_studio"))
 
 
 if __name__ == "__main__":

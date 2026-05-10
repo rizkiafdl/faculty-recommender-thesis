@@ -9,6 +9,9 @@ from app.embedding import get_embedding_provider
 from app.config import (
     CAPACITY_PRIORITY_CODES,
     COMPANY_GROUP_BONUS,
+    ENABLE_GROUP_BONUS,
+    ENABLE_RULE_BOOST,
+    ENABLE_EXTRA_DOCS,
     SIMILARITY_WEIGHT,
     TARGET_MAX_CAPACITY,
     TARGET_MIN_CAPACITY,
@@ -16,6 +19,7 @@ from app.config import (
 from app.rules import (
     SUPERVISOR_PROFILES,
     SupervisorProfile,
+    detect_labels_semantic,
     evaluate_rule_boost,
     normalize_text,
     profile_document,
@@ -272,35 +276,80 @@ def _solve_assignment(
 def generate_recommendations(
     students: list[dict[str, Any]],
     supervisor_profiles: tuple[SupervisorProfile, ...] = SUPERVISOR_PROFILES,
+    label_descriptions: list[dict] | None = None,
+    affinity_index: dict[tuple[str, str], float] | None = None,
+    niche_defaults: dict[str, float] | None = None,
+    extra_supervisor_docs: dict[str, str] | None = None,
 ) -> RecommendationOutput:
     if not students:
         raise ValueError("Data mahasiswa kosong.")
     if not supervisor_profiles:
         raise ValueError("Data dosen kosong.")
-
+    
     supervisor_codes = [profile.code for profile in supervisor_profiles]
-    supervisor_docs = [profile_document(profile) for profile in supervisor_profiles]
+    supervisor_docs = [
+        profile_document(profile) + (
+            " " + extra_supervisor_docs.get(profile.code, "")
+            if extra_supervisor_docs and ENABLE_EXTRA_DOCS
+            else ""
+        )
+        for profile in supervisor_profiles
+    ]
+    
     student_docs = [student_document(student) for student in students]
     embedding_provider = get_embedding_provider()
     embedding_info = embedding_provider.info
-    similarity = embedding_provider.similarity_matrix(student_docs, supervisor_docs)
+
+    student_vectors = embedding_provider.encode_batch(student_docs)
+    supervisor_vectors = embedding_provider.encode_batch(supervisor_docs) if student_vectors is not None else None
+
+    if student_vectors is not None and supervisor_vectors is not None:
+        similarity = np.matmul(student_vectors, supervisor_vectors.T)
+    else:
+        similarity = embedding_provider.similarity_matrix(student_docs, supervisor_docs)
+
     weighted_similarity = similarity * SIMILARITY_WEIGHT
+
+    student_active_labels: list[set[str] | None]
+    if student_vectors is not None and label_descriptions is not None and len(label_descriptions) > 0:
+        from app.embedding import get_label_embedding_cache
+        label_cache = get_label_embedding_cache()
+        student_active_labels = []
+        for i, student in enumerate(students):
+            active = detect_labels_semantic(
+                student_vectors[i], label_descriptions, label_cache, embedding_provider
+            )
+            student_active_labels.append(active if active is not None else None)
+    else:
+        student_active_labels = [None] * len(students)
 
     student_count = len(students)
     supervisor_count = len(supervisor_profiles)
     rule_boost = np.zeros((student_count, supervisor_count), dtype=float)
     reasons_map: dict[tuple[int, int], list[str]] = {}
 
-    for i, student in enumerate(students):
-        for j, profile in enumerate(supervisor_profiles):
-            boost, reasons = evaluate_rule_boost(student, profile)
-            rule_boost[i, j] = boost
-            if reasons:
-                reasons_map[(i, j)] = reasons
+    if ENABLE_RULE_BOOST:
+        for i, student in enumerate(students):
+            for j, profile in enumerate(supervisor_profiles):
+                boost, reasons = evaluate_rule_boost(
+                    student,
+                    profile,
+                    active_labels=student_active_labels[i],
+                    affinity_index=affinity_index or {},
+                    niche_defaults=niche_defaults or {},
+                )
+                rule_boost[i, j] = boost
+                if reasons:
+                    reasons_map[(i, j)] = reasons
 
     score_matrix = weighted_similarity + rule_boost
-    group_boost, student_company = _apply_company_group_bonus(score_matrix, students)
-    score_matrix = score_matrix + group_boost
+
+    if ENABLE_GROUP_BONUS:
+        group_boost, student_company = _apply_company_group_bonus(score_matrix, students)
+        score_matrix = score_matrix + group_boost
+    else:
+        group_boost = np.zeros((student_count, supervisor_count), dtype=float)
+        student_company: dict[int, str] = {}
 
     capacity_plan = _build_capacity_plan(
         supervisor_codes=supervisor_codes,

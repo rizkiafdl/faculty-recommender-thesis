@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 from app.config import (
     CAPACITY_PRIORITY_CODES,
@@ -462,6 +462,31 @@ def detect_labels(text: str) -> set[str]:
     return labels
 
 
+def detect_labels_semantic(
+    student_vec: Any,
+    label_descriptions: list[dict],
+    label_cache: Any,
+    provider: Any,
+) -> set[str]:
+    """
+    Detects active labels for a student using cosine similarity between
+    the student embedding and each label description embedding.
+    Returns set of label_name strings whose cosine score >= threshold.
+    Returns empty set if any label embedding cannot be computed
+    (caller should then use detect_labels() string match fallback).
+    """
+    import numpy as np
+    active: set[str] = set()
+    for ld in label_descriptions:
+        label_vec = label_cache.get_or_compute(ld["label_name"], ld["description"], provider)
+        if label_vec is None:
+            return set()
+        score = float(np.dot(student_vec, label_vec))
+        if score >= ld["threshold"]:
+            active.add(ld["label_name"])
+    return active
+
+
 def _profile_label_terms(profile: SupervisorProfile) -> tuple[str, ...]:
     terms: list[str] = []
     for label in profile.labels:
@@ -493,140 +518,153 @@ def student_labels(student: dict) -> set[str]:
     return detect_labels(student_document(student))
 
 
-def evaluate_rule_boost(student: dict, profile: SupervisorProfile) -> tuple[float, list[str]]:
-    text = normalize_text(
-        " ".join(
-            [
-                str(student.get("track") or ""),
-                str(student.get("partner_lecturer") or ""),
-                str(student.get("position_topic") or ""),
-                str(student.get("work_schema") or ""),
-            ]
-        )
-    )
+def evaluate_rule_boost(
+    student: dict,
+    profile: SupervisorProfile,
+    active_labels: set[str] | None = None,
+    affinity_index: dict[tuple[str, str], float] | None = None,
+    niche_defaults: dict[str, float] | None = None,
+) -> tuple[float, list[str]]:
+    """
+    active_labels:   set of detected label strings from detect_labels_semantic().
+                     If None → falls back to detect_labels() string matching.
+    affinity_index:  dict[(supervisor_code, label_name)] -> boost_value from DB.
+                     If empty or None → falls back to hardcoded boost logic.
+    niche_defaults:  dict[label_name] -> penalty for all non-specialist supervisors.
+                     If empty or None → falls back to hardcoded niche constraints.
+    """
+    text = normalize_text(" ".join([
+        str(student.get("track") or ""),
+        str(student.get("partner_lecturer") or ""),
+        str(student.get("position_topic") or ""),
+        str(student.get("work_schema") or ""),
+    ]))
     gpa = student.get("gpa")
     gpa_value = float(gpa) if gpa is not None else 0.0
-
-    student_labels = detect_labels(text)
-    profile_labels = set(profile.labels)
-    overlap = sorted(student_labels & profile_labels)
-
-    independent = "independent_study" in student_labels
-    research = "research" in student_labels
-    internship = "internship" in student_labels
-    binus_bandung = "binus_bandung" in student_labels
-    binus_internal = "binus_internal_internship" in student_labels
-    network = "network_cloud" in student_labels
-    entrepreneurship = "entrepreneurship" in student_labels
-    drone = "iot_embedded" in student_labels
-    government = "government_public" in student_labels
-    health = "health_medical" in student_labels
-    hospital_niche = "hospital_niche" in student_labels
-    game = "game_interactive" in student_labels
-    banking = "finance_banking" in student_labels
-    apple = "apple_mobile" in student_labels
-    agit = contains_any(text, AGIT_TERMS)
     high_gpa = gpa_value >= HIGH_GPA_THRESHOLD
     current_supervisor_code = str(student.get("current_supervisor_code") or "").strip()
 
+    if active_labels is not None:
+        student_label_set = active_labels
+    else:
+        student_label_set = detect_labels(text)
+
+    profile_labels = set(profile.labels)
     boost = 0.0
     reasons: list[str] = []
 
-    if overlap:
-        overlap_boost = min(5.0, 1.15 * len(overlap))
-        boost += overlap_boost
-        reasons.append(f"Multilabel match: {', '.join(overlap)}")
-    elif profile.flexibility > 0:
-        fallback_boost = min(1.0, 0.35 + profile.flexibility * 0.75)
-        boost += fallback_boost
-        reasons.append("Flexible fallback matching")
+    use_affinity = bool(affinity_index)
 
-    if not current_supervisor_code and profile.code in CAPACITY_PRIORITY_CODES:
-        boost += 0.9
-        reasons.append("Unlabeled overflow routing")
+    if use_affinity:
+        for label in student_label_set:
+            key = (profile.code, label)
+            if key in affinity_index:
+                val = affinity_index[key]
+                if val != 0.0:
+                    boost += val
+                    reasons.append(f"Affinity: {label} ({val:+.1f})")
+            elif niche_defaults and label in niche_defaults:
+                val = niche_defaults[label]
+                boost += val
+                reasons.append(f"Niche penalty: {label} ({val:+.1f})")
+    else:
+        # === HARDCODED FALLBACK (original logic, unchanged) ===
+        overlap = sorted(student_label_set & profile_labels)
+        if overlap:
+            overlap_boost = min(5.0, 1.15 * len(overlap))
+            boost += overlap_boost
+            reasons.append(f"Multilabel match: {', '.join(overlap)}")
+        elif profile.flexibility > 0:
+            fallback_boost = min(1.0, 0.35 + profile.flexibility * 0.75)
+            boost += fallback_boost
+            reasons.append("Flexible fallback matching")
 
-    # Niche hard constraints: route strongly to designated specialists.
-    if government:
-        if profile.code in GOVERNMENT_NICHE_SPECIALIST_CODES:
-            boost += 4.2
-            reasons.append("Government niche specialist")
-        else:
-            boost -= 18.0
-            reasons.append("Government niche non-specialist penalty")
-    if hospital_niche:
-        if profile.code in HOSPITAL_NICHE_SPECIALIST_CODES:
-            boost += 4.8
-            reasons.append("Hospital niche specialist")
-        else:
-            boost -= 20.0
-            reasons.append("Hospital niche non-specialist penalty")
+        government = "government_public" in student_label_set
+        hospital_niche = "hospital_niche" in student_label_set
+        independent = "independent_study" in student_label_set
+        internship = "internship" in student_label_set
+        binus_bandung = "binus_bandung" in student_label_set
+        research = "research" in student_label_set
+        network = "network_cloud" in student_label_set
+        entrepreneurship = "entrepreneurship" in student_label_set
+        drone = "iot_embedded" in student_label_set
+        health = "health_medical" in student_label_set
+        game = "game_interactive" in student_label_set
+        banking = "finance_banking" in student_label_set
+        apple = "apple_mobile" in student_label_set
 
-    if independent and "independent_study" in profile_labels:
-        boost += 1.2
-        reasons.append("Independent study alignment")
-    if internship and "internship" in profile_labels:
-        boost += 1.0
-        reasons.append("Internship alignment")
-    if binus_bandung and "binus_bandung" in profile_labels:
-        boost += 0.8
-        reasons.append("BINUS Bandung context")
+        if government:
+            if profile.code in GOVERNMENT_NICHE_SPECIALIST_CODES:
+                boost += 4.2; reasons.append("Government niche specialist")
+            else:
+                boost -= 18.0; reasons.append("Government niche non-specialist penalty")
+        if hospital_niche:
+            if profile.code in HOSPITAL_NICHE_SPECIALIST_CODES:
+                boost += 4.8; reasons.append("Hospital niche specialist")
+            else:
+                boost -= 20.0; reasons.append("Hospital niche non-specialist penalty")
+        if independent and "independent_study" in profile_labels:
+            boost += 1.2; reasons.append("Independent study alignment")
+        if internship and "internship" in profile_labels:
+            boost += 1.0; reasons.append("Internship alignment")
+        if binus_bandung and "binus_bandung" in profile_labels:
+            boost += 0.8; reasons.append("BINUS Bandung context")
+        if research and "research" in profile_labels:
+            research_boost = 1.2
+            if profile.code == "D6184":
+                research_boost += 1.4; reasons.append("Research priority (Haldi)")
+            boost += research_boost
+        if (network or entrepreneurship) and {"network_cloud", "entrepreneurship"} & profile_labels:
+            network_boost = 1.2
+            if profile.code == "D1749":
+                network_boost += 0.9; reasons.append("Network/entrepreneurship affinity (Johan)")
+            elif profile.code == "D2211":
+                network_boost += 0.6; reasons.append("Network/entrepreneurship support (Abdul Haris)")
+            boost += network_boost
+        if (drone or government) and {"iot_embedded", "government_public"} & profile_labels:
+            boost += 1.6; reasons.append("IoT/government specialization")
+        if health and "health_medical" in profile_labels:
+            boost += 2.0; reasons.append("Health specialization")
+        if game and "game_interactive" in profile_labels:
+            boost += 2.0; reasons.append("Games specialization")
+        if banking and "finance_banking" in profile_labels:
+            boost += 2.0; reasons.append("Banking specialization")
+        if apple and "apple_mobile" in profile_labels:
+            boost += 2.2; reasons.append("Apple Academy specialization")
+        # === END HARDCODED FALLBACK ===
+
+    # --- Always-on rules (not moved to DB) ---
+    binus_internal = "binus_internal_internship" in student_label_set
     if binus_internal and profile.code in BINUS_INTERNAL_ELIGIBLE_CODES:
-        internal_boost = 1.6
+        internal_sub = 0.0
+        if not use_affinity:
+            internal_sub = 1.6
         if "software_engineering" in profile_labels:
-            internal_boost += 0.3
-        if "web_fullstack" in student_labels and "web_fullstack" in profile_labels:
-            internal_boost += 0.45
-        if "data_ai" in student_labels and "data_ai" in profile_labels:
-            internal_boost += 0.35
+            internal_sub += 0.3
+        if "web_fullstack" in student_label_set and "web_fullstack" in profile_labels:
+            internal_sub += 0.45
+        if "data_ai" in student_label_set and "data_ai" in profile_labels:
+            internal_sub += 0.35
         if profile.code in BINUS_INTERNAL_PRIORITY_CODES:
-            internal_boost += 0.65
-            reasons.append("BINUS internal internship priority")
+            internal_sub += 0.65; reasons.append("BINUS internal internship priority")
         else:
             reasons.append("BINUS internal internship eligible")
         if "internship" in profile_labels:
-            internal_boost += 0.35
-        boost += internal_boost
-    if research and "research" in profile_labels:
-        research_boost = 1.2
-        if profile.code == "D6184":
-            research_boost += 1.4
-            reasons.append("Research priority (Haldi)")
-        boost += research_boost
-    if (network or entrepreneurship) and {"network_cloud", "entrepreneurship"} & profile_labels:
-        network_boost = 1.2
-        if profile.code == "D1749":
-            network_boost += 0.9
-            reasons.append("Network/entrepreneurship affinity (Johan)")
-        elif profile.code == "D2211":
-            network_boost += 0.6
-            reasons.append("Network/entrepreneurship support (Abdul Haris)")
-        boost += network_boost
-    if (drone or government) and {"iot_embedded", "government_public"} & profile_labels:
-        boost += 1.6
-        reasons.append("IoT/government specialization")
-    if health and "health_medical" in profile_labels:
-        boost += 2.0
-        reasons.append("Health specialization")
-    if game and "game_interactive" in profile_labels:
-        boost += 2.0
-        reasons.append("Games specialization")
-    if banking and "finance_banking" in profile_labels:
-        boost += 2.0
-        reasons.append("Banking specialization")
-    if apple and "apple_mobile" in profile_labels:
-        boost += 2.2
-        reasons.append("Apple Academy specialization")
+            internal_sub += 0.35
+        boost += internal_sub
 
+    agit = contains_any(text, AGIT_TERMS)
     if agit and profile.code == "D1749":
-        boost += 1.1
-        reasons.append("AGIT company affinity")
+        boost += 1.1; reasons.append("AGIT company affinity")
+
+    if not current_supervisor_code and profile.code in CAPACITY_PRIORITY_CODES:
+        boost += 0.9; reasons.append("Unlabeled overflow routing")
 
     if high_gpa and {"research", "entrepreneurship"} & profile_labels:
         gpa_boost = 1.0
         if profile.code in {"D2211", "D1749"}:
             gpa_boost += 1.0
-        boost += gpa_boost
-        reasons.append("High GPA guidance")
+        boost += gpa_boost; reasons.append("High GPA guidance")
 
     if profile.flexibility > 0:
         boost += 0.25 + min(0.6, profile.flexibility * 0.5)
