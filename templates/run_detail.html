@@ -29,6 +29,30 @@
     <a class="button-link ghost" href="{{ url_for('export_run', run_id=run.id) }}">Export Excel</a>
   </section>
 
+  {% if pipeline_config %}
+    <section class="panel reveal delay-2">
+      <h3>Pipeline Configuration</h3>
+      <div class="kv-grid">
+        <div>
+          <span>Rule Boost</span>
+          <strong><span class="pipeline-badge {{ 'badge-on' if pipeline_config.get('rule_boost') else 'badge-off' }}">{{ 'ON' if pipeline_config.get('rule_boost') else 'OFF' }}</span></strong>
+        </div>
+        <div>
+          <span>Group Bonus</span>
+          <strong><span class="pipeline-badge {{ 'badge-on' if pipeline_config.get('group_bonus') else 'badge-off' }}">{{ 'ON' if pipeline_config.get('group_bonus') else 'OFF' }}</span></strong>
+        </div>
+        <div>
+          <span>Extra Docs</span>
+          <strong><span class="pipeline-badge {{ 'badge-on' if pipeline_config.get('extra_docs') else 'badge-off' }}">{{ 'ON' if pipeline_config.get('extra_docs') else 'OFF' }}</span></strong>
+        </div>
+        <div>
+          <span>Similarity Weight</span>
+          <strong>{{ pipeline_config.get('similarity_weight', '-') }}</strong>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
   {% if run.capacity_note %}
     <section class="panel reveal delay-2">
       <h3>Capacity Note</h3>

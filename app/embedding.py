@@ -176,6 +176,22 @@ class EmbeddingProvider:
                 matrix[i, j] = (len(s_tokens & t_tokens) / len(union)) if union else 0.0
         return matrix
 
+    def encode_batch(self, texts: list[str]) -> "np.ndarray | None":
+        """
+        Returns normalized embedding matrix (N×D) if sentence_transformers model is loaded.
+        Returns None if TF-IDF or token-overlap fallback is active — caller must use
+        detect_labels() string matching fallback in that case.
+        """
+        self._ensure_loaded()
+        if self._model is None:
+            return None
+        return self._model.encode(
+            texts,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+
 
 _PROVIDER: EmbeddingProvider | None = None
 _PROVIDER_LOCK = Lock()
@@ -189,3 +205,57 @@ def get_embedding_provider() -> EmbeddingProvider:
         if _PROVIDER is None:
             _PROVIDER = EmbeddingProvider()
     return _PROVIDER
+
+
+class LabelEmbeddingCache:
+    """
+    Lazy per-label embedding cache. Keyed by "label_name::description" so that
+    updating a label description in the admin UI invalidates only that label's cache entry.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._cache: dict[str, "np.ndarray"] = {}
+
+    def get_or_compute(
+        self,
+        label_name: str,
+        description: str,
+        provider: EmbeddingProvider,
+    ) -> "np.ndarray | None":
+        key = f"{label_name}::{description}"
+        if key in self._cache:
+            return self._cache[key]
+        with self._lock:
+            if key in self._cache:
+                return self._cache[key]
+            vecs = provider.encode_batch([description])
+            if vecs is None:
+                return None
+            vec = vecs[0]
+            self._cache[key] = vec
+        return vec
+
+    def invalidate(self, label_name: str) -> None:
+        with self._lock:
+            keys_to_drop = [k for k in self._cache if k.startswith(f"{label_name}::")]
+            for k in keys_to_drop:
+                del self._cache[k]
+
+    def invalidate_all(self) -> None:
+        with self._lock:
+            self._cache.clear()
+
+
+_LABEL_CACHE: LabelEmbeddingCache | None = None
+_LABEL_CACHE_LOCK = Lock()
+
+
+def get_label_embedding_cache() -> LabelEmbeddingCache:
+    global _LABEL_CACHE
+    if _LABEL_CACHE is not None:
+        return _LABEL_CACHE
+    with _LABEL_CACHE_LOCK:
+        if _LABEL_CACHE is None:
+            _LABEL_CACHE = LabelEmbeddingCache()
+    return _LABEL_CACHE

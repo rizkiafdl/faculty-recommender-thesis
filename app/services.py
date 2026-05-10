@@ -7,22 +7,34 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import func, inspect, select, text
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import inspect, text
+from sqlalchemy.orm import Session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.config import DEFAULT_SHEET_NAME, TARGET_MAX_CAPACITY, TARGET_MIN_CAPACITY
+from app import queries
+from datasets.map_loader import load_supervisor_extra_docs
+from app.config import (
+    DEFAULT_SHEET_NAME,
+    ENABLE_EXTRA_DOCS,
+    ENABLE_GROUP_BONUS,
+    ENABLE_RULE_BOOST,
+    SIMILARITY_WEIGHT,
+    TARGET_MAX_CAPACITY,
+    TARGET_MIN_CAPACITY,
+)
 from app.database import Base, engine
 from app.evaluation import build_evaluation_payload
 from app.excel_io import read_students_from_excel_bytes, read_students_from_excel_path
 from app.models import (
     AppUser,
+    LabelDescription,
     Recommendation,
     RecommendationRun,
     Student,
     Supervisor,
     SupervisorCategory,
     SupervisorCategoryAssignment,
+    SupervisorLabelAffinity,
 )
 from app.recommender import generate_recommendations
 from app.rules import LABEL_TERMS, SUPERVISOR_PROFILES, SupervisorProfile, normalize_text, student_document, student_labels
@@ -76,7 +88,7 @@ def _ensure_recommendation_run_schema() -> None:
         "solver_note": "ALTER TABLE recommendation_runs ADD COLUMN solver_note TEXT",
         "embedding_backend": "ALTER TABLE recommendation_runs ADD COLUMN embedding_backend VARCHAR(64)",
         "embedding_model": "ALTER TABLE recommendation_runs ADD COLUMN embedding_model VARCHAR(255)",
-        "evaluation_json": "ALTER TABLE recommendation_runs ADD COLUMN evaluation_json TEXT",
+        "evaluation_json": "ALTER TABLE recommendation_runs ADD COLUMN evaluation_json TEXT",        "pipeline_config_json": "ALTER TABLE recommendation_runs ADD COLUMN pipeline_config_json TEXT",
     }
     for column_name, ddl in required_ddl.items():
         if column_name in existing_columns:
@@ -93,16 +105,10 @@ def seed_supervisors(session: Session) -> int:
     profile_by_code = {profile.code: profile for profile in SUPERVISOR_PROFILES}
     existing = {
         supervisor.code: supervisor
-        for supervisor in session.execute(select(Supervisor)).scalars().all()
+        for supervisor in queries.get_all_supervisors(session)
     }
-    student_supervisor_rows = session.execute(
-        select(Student.current_supervisor_code, Student.current_supervisor_name).where(
-            Student.current_supervisor_code.is_not(None),
-            func.trim(Student.current_supervisor_code) != "",
-        )
-    ).all()
     student_supervisor_map: dict[str, str] = {}
-    for code_raw, name_raw in student_supervisor_rows:
+    for code_raw, name_raw in queries.get_current_supervisor_codes_names(session):
         code = str(code_raw or "").strip()
         if not code:
             continue
@@ -191,10 +197,7 @@ def register_user(
     if len(password or "") < 6:
         raise ValueError("Password minimal 6 karakter.")
 
-    existing = session.execute(
-        select(AppUser).where(AppUser.username == normalized_username)
-    ).scalars().first()
-    if existing is not None:
+    if queries.get_user_by_username(session, normalized_username) is not None:
         raise ValueError("Username sudah digunakan.")
 
     user = AppUser(
@@ -212,9 +215,7 @@ def authenticate_user(session: Session, username: str, password: str) -> AppUser
     normalized_username = _normalize_username(username)
     if not normalized_username:
         return None
-    user = session.execute(
-        select(AppUser).where(AppUser.username == normalized_username)
-    ).scalars().first()
+    user = queries.get_user_by_username(session, normalized_username)
     if user is None:
         return None
     if not check_password_hash(user.password_hash, password):
@@ -223,7 +224,7 @@ def authenticate_user(session: Session, username: str, password: str) -> AppUser
 
 
 def get_user_by_id(session: Session, user_id: int) -> AppUser | None:
-    return session.get(AppUser, user_id)
+    return queries.get_user_by_id(session, user_id)
 
 
 def _ensure_category_record(session: Session, category_name: str) -> SupervisorCategory:
@@ -231,9 +232,7 @@ def _ensure_category_record(session: Session, category_name: str) -> SupervisorC
     if not normalized:
         raise ValueError("Kategori tidak boleh kosong.")
 
-    category = session.execute(
-        select(SupervisorCategory).where(SupervisorCategory.name == normalized)
-    ).scalars().first()
+    category = queries.get_category_by_name(session, normalized)
     if category is not None:
         return category
 
@@ -244,14 +243,7 @@ def _ensure_category_record(session: Session, category_name: str) -> SupervisorC
 
 
 def list_supervisor_profiles_for_web(session: Session) -> list[dict[str, Any]]:
-    supervisors = session.execute(
-        select(Supervisor)
-        .where(Supervisor.is_active.is_(True))
-        .options(
-            selectinload(Supervisor.category_links).selectinload(SupervisorCategoryAssignment.category)
-        )
-        .order_by(Supervisor.code.asc())
-    ).scalars().all()
+    supervisors = queries.get_active_supervisors_with_categories(session)
 
     rows: list[dict[str, Any]] = []
     for supervisor in supervisors:
@@ -275,21 +267,15 @@ def list_supervisor_profiles_for_web(session: Session) -> list[dict[str, Any]]:
 
 
 def list_category_suggestions(session: Session) -> list[str]:
-    category_values = {
-        row[0]
-        for row in session.execute(select(SupervisorCategory.name)).all()
-        if isinstance(row[0], str) and row[0].strip()
-    }
+    category_values = set(queries.get_all_category_names(session))
     category_values.update(DEFAULT_CATEGORY_SUGGESTIONS)
 
     tracks = {
-        normalize_text(row[0])
-        for row in session.execute(
-            select(Student.track).where(Student.track.is_not(None), func.trim(Student.track) != "")
-        ).all()
-        if isinstance(row[0], str) and row[0].strip()
+        normalize_text(track)
+        for track in queries.get_non_null_tracks(session)
+        if normalize_text(track)
     }
-    category_values.update(track for track in tracks if track)
+    category_values.update(tracks)
     return sorted(category_values)
 
 
@@ -297,20 +283,12 @@ def assign_supervisor_category(session: Session, supervisor_code: str, category_
     code = str(supervisor_code or "").strip()
     if not code:
         raise ValueError("Kode dosen wajib diisi.")
-    supervisor = session.execute(
-        select(Supervisor).where(Supervisor.code == code, Supervisor.is_active.is_(True))
-    ).scalars().first()
+    supervisor = queries.get_active_supervisor_by_code(session, code)
     if supervisor is None:
         raise ValueError(f"Dosen {code} tidak ditemukan.")
 
     category = _ensure_category_record(session=session, category_name=category_name)
-    existing = session.execute(
-        select(SupervisorCategoryAssignment).where(
-            SupervisorCategoryAssignment.supervisor_id == supervisor.id,
-            SupervisorCategoryAssignment.category_id == category.id,
-        )
-    ).scalars().first()
-    if existing is not None:
+    if queries.get_category_assignment(session, supervisor.id, category.id) is not None:
         session.rollback()
         return
 
@@ -329,33 +307,19 @@ def remove_supervisor_category(session: Session, supervisor_code: str, category_
     if not code or not normalized_category:
         return False
 
-    supervisor = session.execute(
-        select(Supervisor).where(Supervisor.code == code)
-    ).scalars().first()
-    category = session.execute(
-        select(SupervisorCategory).where(SupervisorCategory.name == normalized_category)
-    ).scalars().first()
+    supervisor = queries.get_supervisor_by_code(session, code)
+    category = queries.get_category_by_name(session, normalized_category)
     if supervisor is None or category is None:
         return False
 
-    link = session.execute(
-        select(SupervisorCategoryAssignment).where(
-            SupervisorCategoryAssignment.supervisor_id == supervisor.id,
-            SupervisorCategoryAssignment.category_id == category.id,
-        )
-    ).scalars().first()
+    link = queries.get_category_assignment(session, supervisor.id, category.id)
     if link is None:
         return False
 
     session.delete(link)
     session.flush()
 
-    remaining_links = session.execute(
-        select(func.count(SupervisorCategoryAssignment.id)).where(
-            SupervisorCategoryAssignment.category_id == category.id
-        )
-    ).scalar_one()
-    if int(remaining_links) == 0:
+    if queries.count_category_assignments(session, category.id) == 0:
         session.delete(category)
     session.commit()
     return True
@@ -365,9 +329,7 @@ def update_supervisor_keywords(session: Session, supervisor_code: str, profile_k
     code = str(supervisor_code or "").strip()
     if not code:
         raise ValueError("Kode dosen wajib diisi.")
-    supervisor = session.execute(
-        select(Supervisor).where(Supervisor.code == code, Supervisor.is_active.is_(True))
-    ).scalars().first()
+    supervisor = queries.get_active_supervisor_by_code(session, code)
     if supervisor is None:
         raise ValueError(f"Dosen {code} tidak ditemukan.")
     supervisor.profile_keywords = (profile_keywords or "").strip()
@@ -389,18 +351,11 @@ def add_or_update_supervisor(
     if not name:
         raise ValueError("Nama dosen wajib diisi.")
 
-    conflict = session.execute(
-        select(Supervisor).where(
-            func.lower(Supervisor.name) == name.lower(),
-            Supervisor.code != code,
-        )
-    ).scalars().first()
+    conflict = queries.get_supervisor_by_name_not_code(session, name, code)
     if conflict is not None:
         raise ValueError(f"Nama dosen sudah dipakai oleh kode {conflict.code}.")
 
-    existing = session.execute(
-        select(Supervisor).where(Supervisor.code == code)
-    ).scalars().first()
+    existing = queries.get_supervisor_by_code(session, code)
     if existing is None:
         supervisor = Supervisor(
             code=code,
@@ -425,16 +380,7 @@ def add_or_update_supervisor(
 def export_supervisor_configuration_excel(session: Session) -> tuple[bytes, str]:
     supervisors = list_supervisor_profiles_for_web(session)
     category_rows = [{"category": value} for value in list_category_suggestions(session)]
-
-    tracks = [
-        {"track": row[0]}
-        for row in session.execute(
-            select(Student.track)
-            .where(Student.track.is_not(None), func.trim(Student.track) != "")
-            .distinct()
-            .order_by(Student.track.asc())
-        ).all()
-    ]
+    tracks = [{"track": track} for track in queries.get_distinct_student_tracks(session)]
 
     supervisor_df = pd.DataFrame(supervisors)
     categories_df = pd.DataFrame(category_rows)
@@ -449,15 +395,250 @@ def export_supervisor_configuration_excel(session: Session) -> tuple[bytes, str]
     return output.read(), "supervisor_config_export.xlsx"
 
 
+_DEFAULT_LABEL_DESCRIPTIONS: list[tuple[str, str, float, bool]] = [
+    ("government_public",  "student doing internship at a government ministry or public sector institution", 0.50, True),
+    ("hospital_niche",     "student working at a hospital clinic or medical center providing health services", 0.50, True),
+    ("health_medical",     "student working in a healthcare or medical technology context", 0.42, False),
+    ("game_interactive",   "student building a game or interactive media application using Unity or Unreal", 0.45, False),
+    ("finance_banking",    "student doing internship at a bank or financial technology or perbankan company", 0.45, False),
+    ("apple_mobile",       "student in Apple Developer Academy building iOS applications with Swift", 0.50, False),
+    ("independent_study",  "student enrolled in a specific independent study or studi independent program", 0.45, False),
+    ("internship",         "student doing a company internship or magang program", 0.40, False),
+    ("research",           "student doing research fellowship or certified research project", 0.45, False),
+    ("binus_bandung",      "student at BINUS University School of Computer Science Bandung campus", 0.45, False),
+    ("binus_internal_internship", "student doing internship internally within BINUS University or Apple Developer Academy", 0.45, False),
+    ("network_cloud",      "student working on network infrastructure cloud computing or IT operations", 0.42, False),
+    ("entrepreneurship",   "student involved in startup business venture or entrepreneurship program", 0.42, False),
+    ("iot_embedded",       "student building IoT embedded system microcontroller sensor or drone project", 0.45, False),
+    ("data_ai",            "student doing data science machine learning analytics or AI project", 0.42, False),
+    ("web_fullstack",      "student building web application frontend backend or full stack system", 0.40, False),
+    ("software_engineering", "student developing software application or engineering system", 0.38, False),
+    ("education",          "student working in an education technology or academic learning platform", 0.45, False),
+    ("cyber_security",     "student doing cybersecurity penetration testing or information security work", 0.50, False),
+]
+
+
+def seed_label_descriptions(session: Session) -> int:
+    existing = queries.get_existing_label_names(session)
+    changes = 0
+    for label_name, description, threshold, is_niche in _DEFAULT_LABEL_DESCRIPTIONS:
+        if label_name in existing:
+            continue
+        session.add(LabelDescription(
+            label_name=label_name,
+            description=description,
+            threshold=threshold,
+            is_niche=is_niche,
+        ))
+        changes += 1
+    if changes:
+        session.commit()
+    return changes
+
+
+def load_label_descriptions(session: Session) -> list[dict]:
+    rows = queries.get_all_label_descriptions(session)
+
+    if not rows:
+        return [
+            {"label_name": n, "description": d, "threshold": t, "is_niche": nf}
+            for n, d, t, nf in _DEFAULT_LABEL_DESCRIPTIONS
+        ]
+
+    return [
+        {
+            "label_name": row.label_name,
+            "description": row.description,
+            "threshold": row.threshold,
+            "is_niche": row.is_niche,
+        }
+        for row in rows
+    ]
+
+
+def save_label_description(
+    session: Session,
+    label_name: str,
+    description: str,
+    threshold: float,
+    is_niche: bool,
+) -> None:
+    row = queries.get_label_description_by_name(session, label_name)
+    if row is None:
+        session.add(LabelDescription(
+            label_name=label_name,
+            description=description,
+            threshold=threshold,
+            is_niche=is_niche,
+        ))
+    else:
+        row.description = description
+        row.threshold = threshold
+        row.is_niche = is_niche
+    session.commit()
+
+
+def reset_label_description(session: Session, label_name: str) -> None:
+    for n, d, t, nf in _DEFAULT_LABEL_DESCRIPTIONS:
+        if n == label_name:
+            save_label_description(session, label_name=n, description=d, threshold=t, is_niche=nf)
+            return
+    raise ValueError(f"Label '{label_name}' tidak ada di default seed.")
+
+
+def list_students_for_preview(session: Session) -> list[dict]:
+    return [{"student_id": r[0], "name": r[1]} for r in queries.get_students_preview(session)]
+
+
+def seed_affinity_matrix(session: Session) -> int:
+    if queries.count_affinity_rows(session) > 0:
+        return 0
+
+    supervisor_id_by_code = queries.get_supervisor_code_id_map(session)
+
+    rows_to_seed: list[tuple[str | None, str, float, bool]] = [
+        ("D6407", "government_public", 4.2, False),
+        (None,    "government_public", -18.0, True),
+        ("D6274", "hospital_niche", 4.8, False),
+        (None,    "hospital_niche", -20.0, True),
+        ("D6184", "research", 2.6, False),
+        ("D7187", "research", 1.2, False),
+        ("D5918", "research", 1.2, False),
+        ("D6532", "research", 1.2, False),
+        ("D6407", "research", 1.2, False),
+        ("D6274", "research", 1.2, False),
+        ("D7055", "research", 1.2, False),
+        ("D1749", "network_cloud", 2.1, False),
+        ("D2211", "network_cloud", 1.8, False),
+        ("D6407", "network_cloud", 1.2, False),
+        ("D1749", "entrepreneurship", 2.1, False),
+        ("D2211", "entrepreneurship", 1.8, False),
+        ("D6469", "game_interactive", 2.0, False),
+        ("D6836", "finance_banking", 2.0, False),
+        ("D6408", "apple_mobile", 2.2, False),
+        ("D6274", "health_medical", 2.0, False),
+        ("D6407", "iot_embedded", 1.6, False),
+        ("D6184", "iot_embedded", 1.6, False),
+        ("D6670", "independent_study", 1.2, False),
+        ("D7187", "independent_study", 1.2, False),
+        ("D5918", "independent_study", 1.2, False),
+        ("D6532", "independent_study", 1.2, False),
+        ("D7055", "independent_study", 1.2, False),
+        ("D6670", "internship", 1.0, False),
+        ("D7187", "internship", 1.0, False),
+        ("D5918", "internship", 1.0, False),
+        ("D6532", "internship", 1.0, False),
+        ("D2211", "internship", 1.0, False),
+        ("D1749", "internship", 1.0, False),
+        ("D6826", "internship", 1.0, False),
+        ("D6836", "internship", 1.0, False),
+        ("D6670", "binus_bandung", 0.8, False),
+        ("D7187", "binus_bandung", 0.8, False),
+        ("D6670", "binus_internal_internship", 2.6, False),
+        ("D7187", "binus_internal_internship", 2.6, False),
+        ("D5918", "binus_internal_internship", 2.6, False),
+        ("D6532", "binus_internal_internship", 2.6, False),
+        ("D6469", "binus_internal_internship", 2.6, False),
+        ("D6408", "binus_internal_internship", 2.6, False),
+        ("D6826", "binus_internal_internship", 2.6, False),
+        ("D6184", "binus_internal_internship", 2.6, False),
+        ("D2211", "binus_internal_internship", 2.6, False),
+        ("D1749", "binus_internal_internship", 2.6, False),
+        ("D6274", "binus_internal_internship", 1.6, False),
+        ("D6407", "binus_internal_internship", 1.6, False),
+        ("D6836", "binus_internal_internship", 1.6, False),
+        ("D7055", "binus_internal_internship", 1.6, False),
+    ]
+
+    for code, label_name, boost_value, is_niche_penalty in rows_to_seed:
+        supervisor_id = supervisor_id_by_code.get(code) if code else None
+        if code and supervisor_id is None:
+            continue
+        session.add(SupervisorLabelAffinity(
+            supervisor_id=supervisor_id,
+            label_name=label_name,
+            boost_value=boost_value,
+            is_niche_penalty=is_niche_penalty,
+        ))
+
+    session.commit()
+    return len(rows_to_seed)
+
+
+def load_affinity_lookup(session: Session) -> tuple[dict[tuple[str, str], float], dict[str, float]]:
+    if queries.count_affinity_rows(session) == 0:
+        return {}, {}
+
+    affinity_index: dict[tuple[str, str], float] = {}
+    niche_defaults: dict[str, float] = {}
+
+    for affinity_row, supervisor_code in queries.get_affinity_with_supervisor_codes(session):
+        if affinity_row.is_niche_penalty and supervisor_code is None:
+            niche_defaults[affinity_row.label_name] = affinity_row.boost_value
+        elif supervisor_code:
+            affinity_index[(supervisor_code, affinity_row.label_name)] = affinity_row.boost_value
+
+    return affinity_index, niche_defaults
+
+
+def load_affinity_matrix_for_web(
+    session: Session,
+    supervisors: list[dict],
+) -> dict[str, dict[str, float]]:
+    affinity_index, niche_defaults = load_affinity_lookup(session)
+    label_names = queries.get_label_names_ordered(session)
+
+    grid: dict[str, dict[str, float]] = {}
+    for label in label_names:
+        grid[label] = {}
+        for sup in supervisors:
+            code = sup["code"]
+            key = (code, label)
+            if key in affinity_index:
+                grid[label][code] = affinity_index[key]
+            elif label in niche_defaults:
+                grid[label][code] = niche_defaults[label]
+            else:
+                grid[label][code] = 0.0
+    return grid
+
+
+def save_affinity_cells(session: Session, cells: list[dict]) -> None:
+    supervisor_id_by_code = queries.get_supervisor_code_id_map(session)
+    for cell in cells:
+        code = str(cell.get("supervisor_code") or "").strip()
+        label_name = str(cell.get("label_name") or "").strip()
+        boost_value = float(cell.get("boost_value", 0.0))
+        if not code or not label_name:
+            continue
+        supervisor_id = supervisor_id_by_code.get(code)
+        if supervisor_id is None:
+            continue
+        existing = queries.get_affinity_by_supervisor_and_label(session, supervisor_id, label_name)
+        if existing:
+            existing.boost_value = boost_value
+        else:
+            session.add(SupervisorLabelAffinity(
+                supervisor_id=supervisor_id,
+                label_name=label_name,
+                boost_value=boost_value,
+                is_niche_penalty=False,
+            ))
+    session.commit()
+
+
+def reset_affinity_matrix(session: Session) -> None:
+    queries.delete_all_affinities(session)
+    session.commit()
+    seed_affinity_matrix(session)
+
+
 def _upsert_students(session: Session, rows: list[dict[str, Any]]) -> dict[str, int]:
     if not rows:
         return {"inserted": 0, "updated": 0, "total": 0}
 
     student_ids = [row["student_id"] for row in rows]
-    existing_students = {
-        student.student_id: student
-        for student in session.execute(select(Student).where(Student.student_id.in_(student_ids))).scalars().all()
-    }
+    existing_students = queries.get_students_by_student_ids(session, student_ids)
 
     inserted = 0
     updated = 0
@@ -500,14 +681,7 @@ def import_students_from_bytes(
 
 
 def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
-    supervisors = session.execute(
-        select(Supervisor)
-        .where(Supervisor.is_active.is_(True))
-        .options(
-            selectinload(Supervisor.category_links).selectinload(SupervisorCategoryAssignment.category)
-        )
-        .order_by(Supervisor.code.asc())
-    ).scalars().all()
+    supervisors = queries.get_active_supervisors_with_categories(session)
     profile_lookup = {profile.code: profile for profile in SUPERVISOR_PROFILES}
     profiles: list[SupervisorProfile] = []
     for supervisor in supervisors:
@@ -565,11 +739,7 @@ def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
         return profiles
 
     supervisor_codes = {profile.code for profile in profiles}
-    history_students = session.execute(
-        select(Student)
-        .where(Student.current_supervisor_code.in_(supervisor_codes))
-        .order_by(Student.id.asc())
-    ).scalars().all()
+    history_students = queries.get_students_by_supervisor_codes(session, supervisor_codes)
 
     grouped_by_code: dict[str, list[dict[str, Any]]] = {}
     for student in history_students:
@@ -595,9 +765,9 @@ def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
         token_counter: Counter[str] = Counter()
         label_counter: Counter[str] = Counter()
         for record in records:
-            text = student_document(record)
+            text_val = student_document(record)
             label_counter.update(student_labels(record))
-            for token in text.split():
+            for token in text_val.split():
                 if len(token) < 3:
                     continue
                 if token.isdigit() or token in PROFILE_TOKEN_STOPWORDS:
@@ -631,9 +801,8 @@ def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
 
 
 def _students_for_recommender(session: Session) -> list[dict[str, Any]]:
-    students = session.execute(select(Student).order_by(Student.student_id.asc())).scalars().all()
     items: list[dict[str, Any]] = []
-    for student in students:
+    for student in queries.get_all_students(session):
         items.append(
             {
                 "student_id": student.student_id,
@@ -671,7 +840,22 @@ def generate_and_store_recommendations(
     if not profiles:
         raise ValueError("Belum ada data dosen aktif.")
 
-    output = generate_recommendations(students=student_payload, supervisor_profiles=tuple(profiles))
+    label_descriptions = load_label_descriptions(session)
+    affinity_index, niche_defaults = load_affinity_lookup(session)
+
+    try:
+        extra_supervisor_docs = load_supervisor_extra_docs()
+    except Exception:
+        extra_supervisor_docs = {}
+
+    output = generate_recommendations(
+        students=student_payload,
+        supervisor_profiles=tuple(profiles),
+        label_descriptions=label_descriptions,
+        affinity_index=affinity_index,
+        niche_defaults=niche_defaults,
+        extra_supervisor_docs=extra_supervisor_docs,
+    )
     evaluation_payload = build_evaluation_payload(
         content_scores=output.content_similarity_matrix,
         hybrid_scores=output.hybrid_score_matrix,
@@ -680,13 +864,8 @@ def generate_and_store_recommendations(
         recommendation_items=output.items,
     )
 
-    supervisor_by_code = {
-        supervisor.code: supervisor
-        for supervisor in session.execute(select(Supervisor).where(Supervisor.is_active.is_(True))).scalars().all()
-    }
-    student_by_student_id = {
-        student.student_id: student for student in session.execute(select(Student)).scalars().all()
-    }
+    supervisor_by_code = queries.get_active_supervisor_map(session)
+    student_by_student_id = queries.get_all_students_map(session)
 
     capacity_bounds = {}
     for idx, profile in enumerate(profiles):
@@ -695,6 +874,13 @@ def generate_and_store_recommendations(
             "max": output.capacity_plan.max_caps[idx],
             "count": output.counts_by_supervisor.get(profile.code, 0),
         }
+
+    pipeline_config = {
+        "rule_boost": ENABLE_RULE_BOOST,
+        "group_bonus": ENABLE_GROUP_BONUS,
+        "extra_docs": ENABLE_EXTRA_DOCS,
+        "similarity_weight": SIMILARITY_WEIGHT,
+    }
 
     note_parts: list[str] = []
     if output.solver_note:
@@ -716,6 +902,7 @@ def generate_and_store_recommendations(
         embedding_backend=output.embedding_backend,
         embedding_model=output.embedding_model,
         evaluation_json=json.dumps(evaluation_payload),
+        pipeline_config_json=json.dumps(pipeline_config),
         objective_score=output.objective_score,
     )
     session.add(run)
@@ -744,26 +931,21 @@ def generate_and_store_recommendations(
 
 
 def get_latest_run(session: Session) -> RecommendationRun | None:
-    return session.execute(
-        select(RecommendationRun).order_by(RecommendationRun.created_at.desc(), RecommendationRun.id.desc())
-    ).scalars().first()
+    return queries.get_latest_run(session)
 
 
 def list_runs(session: Session, limit: int | None = None) -> list[RecommendationRun]:
-    stmt = select(RecommendationRun).order_by(RecommendationRun.id.desc())
-    if limit is not None and limit > 0:
-        stmt = stmt.limit(limit)
-    return session.execute(stmt).scalars().all()
+    return queries.list_runs(session, limit)
 
 
 def get_run_by_id(session: Session, run_id: int) -> RecommendationRun | None:
-    return session.get(RecommendationRun, run_id)
+    return queries.get_run_by_id(session, run_id)
 
 
 def _resolve_run_id(session: Session, run_id: int | None) -> int:
     if run_id is not None:
         return run_id
-    latest = get_latest_run(session)
+    latest = queries.get_latest_run(session)
     if latest is None:
         raise ValueError("Belum ada hasil rekomendasi.")
     return latest.id
@@ -771,20 +953,12 @@ def _resolve_run_id(session: Session, run_id: int | None) -> int:
 
 def list_recommendations(session: Session, run_id: int | None = None) -> tuple[RecommendationRun, list[dict[str, Any]]]:
     resolved_run_id = _resolve_run_id(session, run_id)
-    run = get_run_by_id(session, resolved_run_id)
+    run = queries.get_run_by_id(session, resolved_run_id)
     if run is None:
         raise ValueError(f"Run {resolved_run_id} tidak ditemukan.")
 
-    rows = session.execute(
-        select(Recommendation, Student, Supervisor)
-        .join(Student, Recommendation.student_id == Student.id)
-        .join(Supervisor, Recommendation.supervisor_id == Supervisor.id)
-        .where(Recommendation.run_id == resolved_run_id)
-        .order_by(Supervisor.name.asc(), Student.name.asc())
-    ).all()
-
     data: list[dict[str, Any]] = []
-    for recommendation, student, supervisor in rows:
+    for recommendation, student, supervisor in queries.get_recommendations_with_entities(session, resolved_run_id):
         data.append(
             {
                 "run_id": recommendation.run_id,
@@ -811,22 +985,14 @@ def list_recommendations(session: Session, run_id: int | None = None) -> tuple[R
 
 def summary_by_supervisor(session: Session, run_id: int | None = None) -> tuple[RecommendationRun, list[dict[str, Any]]]:
     resolved_run_id = _resolve_run_id(session, run_id)
-    run = get_run_by_id(session, resolved_run_id)
+    run = queries.get_run_by_id(session, resolved_run_id)
     if run is None:
         raise ValueError(f"Run {resolved_run_id} tidak ditemukan.")
 
     bounds = json.loads(run.capacity_bounds_json or "{}")
-    count_rows = session.execute(
-        select(Supervisor.code, Supervisor.name, func.count(Recommendation.id))
-        .select_from(Supervisor)
-        .join(Recommendation, Recommendation.supervisor_id == Supervisor.id)
-        .where(Recommendation.run_id == resolved_run_id)
-        .group_by(Supervisor.code, Supervisor.name)
-        .order_by(Supervisor.name.asc())
-    ).all()
 
     summary: list[dict[str, Any]] = []
-    for code, name, count in count_rows:
+    for code, name, count in queries.get_supervisor_recommendation_counts(session, resolved_run_id):
         limit = bounds.get(code, {})
         min_cap = limit.get("min", TARGET_MIN_CAPACITY)
         max_cap = limit.get("max", TARGET_MAX_CAPACITY)
@@ -846,7 +1012,7 @@ def summary_by_supervisor(session: Session, run_id: int | None = None) -> tuple[
 
 def evaluation_by_run(session: Session, run_id: int | None = None) -> tuple[RecommendationRun, dict[str, Any]]:
     resolved_run_id = _resolve_run_id(session, run_id)
-    run = get_run_by_id(session, resolved_run_id)
+    run = queries.get_run_by_id(session, resolved_run_id)
     if run is None:
         raise ValueError(f"Run {resolved_run_id} tidak ditemukan.")
     payload = json.loads(run.evaluation_json or "{}")

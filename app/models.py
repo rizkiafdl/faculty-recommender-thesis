@@ -74,6 +74,33 @@ class SupervisorCategoryAssignment(Base):
     category = relationship("SupervisorCategory", back_populates="supervisor_links")
 
 
+class LabelDescription(Base):
+    __tablename__ = "label_descriptions"
+
+    id = Column(Integer, primary_key=True)
+    label_name = Column(String(64), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=False)
+    threshold = Column(Float, nullable=False, default=0.45)
+    is_niche = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SupervisorLabelAffinity(Base):
+    __tablename__ = "supervisor_label_affinities"
+    __table_args__ = (
+        UniqueConstraint("supervisor_id", "label_name", name="uq_supervisor_label"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    supervisor_id = Column(Integer, ForeignKey("supervisors.id"), nullable=True, index=True)
+    label_name = Column(String(64), nullable=False, index=True)
+    boost_value = Column(Float, nullable=False, default=0.0)
+    is_niche_penalty = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    supervisor = relationship("Supervisor", foreign_keys=[supervisor_id])
+
+
 class Student(Base):
     __tablename__ = "students"
 
@@ -124,6 +151,7 @@ class RecommendationRun(Base):
     embedding_backend = Column(String(64), nullable=True)
     embedding_model = Column(String(255), nullable=True)
     evaluation_json = Column(Text, nullable=True)
+    pipeline_config_json = Column(Text, nullable=True)
     objective_score = Column(Float, nullable=True)
 
     recommendations = relationship(
