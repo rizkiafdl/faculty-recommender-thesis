@@ -9,6 +9,8 @@ from app.embedding import get_embedding_provider
 from app.config import (
     CAPACITY_PRIORITY_CODES,
     COMPANY_GROUP_BONUS,
+    EMBEDDING_MODEL_NAME,
+    EMBEDDING_TASK,
     ENABLE_GROUP_BONUS,
     ENABLE_RULE_BOOST,
     ENABLE_EXTRA_DOCS,
@@ -45,6 +47,15 @@ class RecommendationItem:
     final_score: float
     reasons: list[str]
     company_group_key: str | None
+
+
+@dataclass
+class RunOverrides:
+    embedding_model: str
+    embedding_task: str
+    enable_rule_boost: bool
+    enable_group_bonus: bool
+    enable_extra_docs: bool
 
 
 @dataclass
@@ -280,33 +291,44 @@ def generate_recommendations(
     affinity_index: dict[tuple[str, str], float] | None = None,
     niche_defaults: dict[str, float] | None = None,
     extra_supervisor_docs: dict[str, str] | None = None,
+    overrides: RunOverrides | None = None,
 ) -> RecommendationOutput:
+    if overrides is None:
+        overrides = RunOverrides(
+            embedding_model=EMBEDDING_MODEL_NAME,
+            embedding_task=EMBEDDING_TASK,
+            enable_rule_boost=ENABLE_RULE_BOOST,
+            enable_group_bonus=ENABLE_GROUP_BONUS,
+            enable_extra_docs=ENABLE_EXTRA_DOCS,
+        )
+
     if not students:
         raise ValueError("Data mahasiswa kosong.")
     if not supervisor_profiles:
         raise ValueError("Data dosen kosong.")
-    
+
     supervisor_codes = [profile.code for profile in supervisor_profiles]
     supervisor_docs = [
         profile_document(profile) + (
             " " + extra_supervisor_docs.get(profile.code, "")
-            if extra_supervisor_docs and ENABLE_EXTRA_DOCS
+            if extra_supervisor_docs and overrides.enable_extra_docs
             else ""
         )
         for profile in supervisor_profiles
     ]
-    
-    student_docs = [student_document(student) for student in students]
-    embedding_provider = get_embedding_provider()
-    embedding_info = embedding_provider.info
 
-    student_vectors = embedding_provider.encode_batch(student_docs)
-    supervisor_vectors = embedding_provider.encode_batch(supervisor_docs) if student_vectors is not None else None
+    student_docs = [student_document(student) for student in students]
+    embedding_provider = get_embedding_provider(overrides.embedding_model)
+    embedding_info = embedding_provider.info
+    task = overrides.embedding_task
+
+    student_vectors = embedding_provider.encode_batch(student_docs, task=task)
+    supervisor_vectors = embedding_provider.encode_batch(supervisor_docs, task=task) if student_vectors is not None else None
 
     if student_vectors is not None and supervisor_vectors is not None:
         similarity = np.matmul(student_vectors, supervisor_vectors.T)
     else:
-        similarity = embedding_provider.similarity_matrix(student_docs, supervisor_docs)
+        similarity = embedding_provider.similarity_matrix(student_docs, supervisor_docs, task=task)
 
     weighted_similarity = similarity * SIMILARITY_WEIGHT
 
@@ -328,7 +350,7 @@ def generate_recommendations(
     rule_boost = np.zeros((student_count, supervisor_count), dtype=float)
     reasons_map: dict[tuple[int, int], list[str]] = {}
 
-    if ENABLE_RULE_BOOST:
+    if overrides.enable_rule_boost:
         for i, student in enumerate(students):
             for j, profile in enumerate(supervisor_profiles):
                 boost, reasons = evaluate_rule_boost(
@@ -344,7 +366,7 @@ def generate_recommendations(
 
     score_matrix = weighted_similarity + rule_boost
 
-    if ENABLE_GROUP_BONUS:
+    if overrides.enable_group_bonus:
         group_boost, student_company = _apply_company_group_bonus(score_matrix, students)
         score_matrix = score_matrix + group_boost
     else:

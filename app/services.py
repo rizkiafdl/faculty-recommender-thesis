@@ -15,6 +15,8 @@ from app import queries
 from datasets.map_loader import load_supervisor_extra_docs
 from app.config import (
     DEFAULT_SHEET_NAME,
+    EMBEDDING_MODEL_NAME,
+    EMBEDDING_TASK,
     ENABLE_EXTRA_DOCS,
     ENABLE_GROUP_BONUS,
     ENABLE_RULE_BOOST,
@@ -36,7 +38,7 @@ from app.models import (
     SupervisorCategoryAssignment,
     SupervisorLabelAffinity,
 )
-from app.recommender import generate_recommendations
+from app.recommender import RunOverrides, generate_recommendations
 from app.rules import LABEL_TERMS, SUPERVISOR_PROFILES, SupervisorProfile, normalize_text, student_document, student_labels
 
 PROFILE_TOKEN_STOPWORDS = {
@@ -830,7 +832,16 @@ def _students_for_recommender(session: Session) -> list[dict[str, Any]]:
 def generate_and_store_recommendations(
     session: Session,
     input_source: str = "manual-run",
+    overrides: RunOverrides | None = None,
 ) -> RecommendationRun:
+    if overrides is None:
+        overrides = RunOverrides(
+            embedding_model=EMBEDDING_MODEL_NAME,
+            embedding_task=EMBEDDING_TASK,
+            enable_rule_boost=ENABLE_RULE_BOOST,
+            enable_group_bonus=ENABLE_GROUP_BONUS,
+            enable_extra_docs=ENABLE_EXTRA_DOCS,
+        )
     seed_supervisors(session)
     student_payload = _students_for_recommender(session)
     if not student_payload:
@@ -855,6 +866,7 @@ def generate_and_store_recommendations(
         affinity_index=affinity_index,
         niche_defaults=niche_defaults,
         extra_supervisor_docs=extra_supervisor_docs,
+        overrides=overrides,
     )
     evaluation_payload = build_evaluation_payload(
         content_scores=output.content_similarity_matrix,
@@ -876,10 +888,12 @@ def generate_and_store_recommendations(
         }
 
     pipeline_config = {
-        "rule_boost": ENABLE_RULE_BOOST,
-        "group_bonus": ENABLE_GROUP_BONUS,
-        "extra_docs": ENABLE_EXTRA_DOCS,
+        "rule_boost": overrides.enable_rule_boost,
+        "group_bonus": overrides.enable_group_bonus,
+        "extra_docs": overrides.enable_extra_docs,
         "similarity_weight": SIMILARITY_WEIGHT,
+        "embedding_model": overrides.embedding_model,
+        "embedding_task": overrides.embedding_task,
     }
 
     note_parts: list[str] = []
