@@ -45,10 +45,9 @@
             <h2>{{ page_title or 'Rekomendasi Dosen Pembimbing' }}</h2>
             {% if page_subtitle %}<p>{{ page_subtitle }}</p>{% endif %}
           </div>
-          <form method="post" action="{{ url_for('generate') }}" class="quick-generate">
-            <input type="hidden" name="next" value="{{ url_for('runs_history') }}" />
-            <button type="submit" class="accent">Generate New Run</button>
-          </form>
+          <button type="button" class="accent" onclick="document.getElementById('run-config-modal').showModal()">
+            ⚙ Generate New Run
+          </button>
         </header>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -66,5 +65,137 @@
         </section>
       </main>
     </div>
+    <dialog id="run-config-modal" class="run-config-dialog">
+      <form method="post" action="{{ url_for('generate') }}" class="run-config-form">
+        <input type="hidden" name="next" value="{{ url_for('runs_history') }}" />
+
+        <div class="dialog-header">
+          <h3>Configure Run</h3>
+          <button type="button" class="dialog-close" onclick="document.getElementById('run-config-modal').close()">✕</button>
+        </div>
+
+        <div class="dialog-body">
+          <div class="config-section">
+            <label class="config-label">Embedding Model</label>
+            <div class="model-options" id="model-options-list">
+              {% for model in available_models %}
+              <label class="model-option {{ 'selected' if model == run_config_defaults.embedding_model else '' }}"
+                     data-model="{{ model }}">
+                <input type="radio" name="embedding_model" value="{{ model }}"
+                  {{ 'checked' if model == run_config_defaults.embedding_model else '' }}
+                  onchange="updateModelOptionStyles()" />
+                <span class="model-name">{{ model.split('/')[-1] }}</span>
+                <span class="model-org">{{ model.split('/')[0] }}</span>
+                <span class="model-status-chip" id="status-{{ loop.index }}">…</span>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="config-section">
+            <label class="config-label">Pipeline Toggles</label>
+            <div class="toggle-grid">
+              <label class="toggle-row">
+                <span class="toggle-name">Rule Boost</span>
+                <span class="toggle-desc">Semantic label detection + affinity weights</span>
+                <div class="toggle-switch">
+                  <input type="checkbox" name="enable_rule_boost" id="tog-rb"
+                    {{ 'checked' if run_config_defaults.enable_rule_boost else '' }} />
+                  <span class="toggle-slider"></span>
+                </div>
+              </label>
+              <label class="toggle-row">
+                <span class="toggle-name">Group Bonus</span>
+                <span class="toggle-desc">Company group co-assignment bonus</span>
+                <div class="toggle-switch">
+                  <input type="checkbox" name="enable_group_bonus" id="tog-gb"
+                    {{ 'checked' if run_config_defaults.enable_group_bonus else '' }} />
+                  <span class="toggle-slider"></span>
+                </div>
+              </label>
+              <label class="toggle-row">
+                <span class="toggle-name">Extra Docs</span>
+                <span class="toggle-desc">Enrich supervisor profile from map_2026.xlsx</span>
+                <div class="toggle-switch">
+                  <input type="checkbox" name="enable_extra_docs" id="tog-ed"
+                    {{ 'checked' if run_config_defaults.enable_extra_docs else '' }} />
+                  <span class="toggle-slider"></span>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="dialog-footer">
+          <button type="button" class="ghost" onclick="document.getElementById('run-config-modal').close()">Cancel</button>
+          <button type="submit" class="accent" id="run-submit-btn">Run</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script>
+      const MODEL_STATUS_URL = "{{ url_for('model_status') }}";
+      let _statusPollInterval = null;
+
+      function updateModelOptionStyles() {
+        document.querySelectorAll('.model-option').forEach(el => {
+          el.classList.toggle('selected', el.querySelector('input[type=radio]').checked);
+        });
+        updateRunButton();
+      }
+
+      function updateRunButton() {
+        const selected = document.querySelector('input[name=embedding_model]:checked');
+        const btn = document.getElementById('run-submit-btn');
+        if (!selected || !btn) return;
+        const chip = document.querySelector(`[data-model="${selected.value}"] .model-status-chip`);
+        const status = chip ? chip.dataset.status : 'not_loaded';
+        const isLoading = status === 'loading';
+        btn.disabled = isLoading;
+        btn.textContent = isLoading ? 'Waiting for model…' : 'Run';
+      }
+
+      function applyStatuses(statuses) {
+        document.querySelectorAll('.model-option').forEach(el => {
+          const model = el.dataset.model;
+          const chip = el.querySelector('.model-status-chip');
+          if (!chip || !statuses[model]) return;
+          const s = statuses[model];
+          chip.dataset.status = s;
+          chip.className = 'model-status-chip status-' + s;
+          chip.textContent = s === 'ready' ? '✓ Ready'
+                           : s === 'loading' ? '⏳ Loading'
+                           : s === 'fallback' ? '⚠ Fallback'
+                           : 'Not loaded';
+        });
+        updateRunButton();
+        const allDone = Object.values(statuses).every(s => s === 'ready' || s === 'fallback' || s === 'not_loaded');
+        if (allDone && _statusPollInterval) {
+          clearInterval(_statusPollInterval);
+          _statusPollInterval = null;
+        }
+      }
+
+      function pollModelStatus() {
+        fetch(MODEL_STATUS_URL)
+          .then(r => r.json())
+          .then(applyStatuses)
+          .catch(() => {});
+      }
+
+      document.getElementById('run-config-modal').addEventListener('toggle', function(e) {
+        if (e.newState === 'open') {
+          pollModelStatus();
+          if (!_statusPollInterval) {
+            _statusPollInterval = setInterval(pollModelStatus, 2500);
+          }
+        } else {
+          if (_statusPollInterval) {
+            clearInterval(_statusPollInterval);
+            _statusPollInterval = null;
+          }
+        }
+      });
+    </script>
   </body>
 </html>

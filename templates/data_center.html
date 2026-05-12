@@ -48,10 +48,9 @@
     <article class="panel reveal delay-2">
       <h3>Pipeline Trigger</h3>
       <p class="muted">Jalankan rekomendasi terbaru setelah import.</p>
-      <form method="post" action="{{ url_for('generate') }}">
-        <input type="hidden" name="next" value="{{ url_for('runs_history') }}" />
-        <button type="submit" class="accent">Generate New Run</button>
-      </form>
+      <button type="button" class="accent" onclick="document.getElementById('run-config-modal').showModal()">
+        ⚙ Generate New Run
+      </button>
       {% if latest_run %}
         <hr class="soft-line" />
         <small>Latest run: #{{ latest_run.id }} ({{ latest_run.created_at }})</small>
