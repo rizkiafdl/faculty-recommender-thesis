@@ -486,14 +486,6 @@ def detect_labels_semantic(
             active.add(ld["label_name"])
     return active
 
-
-def _profile_label_terms(profile: SupervisorProfile) -> tuple[str, ...]:
-    terms: list[str] = []
-    for label in profile.labels:
-        terms.extend(LABEL_TERMS.get(label, ()))
-    return _unique_terms(terms)
-
-
 def profile_document(profile: SupervisorProfile) -> str:
     parts = [
         profile.name,
@@ -567,71 +559,71 @@ def evaluate_rule_boost(
                 val = niche_defaults[label]
                 boost += val
                 reasons.append(f"Niche penalty: {label} ({val:+.1f})")
-    else:
-        # === HARDCODED FALLBACK (original logic, unchanged) ===
-        overlap = sorted(student_label_set & profile_labels)
-        if overlap:
-            overlap_boost = min(5.0, 1.15 * len(overlap))
-            boost += overlap_boost
-            reasons.append(f"Multilabel match: {', '.join(overlap)}")
-        elif profile.flexibility > 0:
-            fallback_boost = min(1.0, 0.35 + profile.flexibility * 0.75)
-            boost += fallback_boost
-            reasons.append("Flexible fallback matching")
+    # else:
+    #     # === HARDCODED FALLBACK (original logic, unchanged) ===
+    #     overlap = sorted(student_label_set & profile_labels)
+    #     if overlap:
+    #         overlap_boost = min(5.0, 1.15 * len(overlap))
+    #         boost += overlap_boost
+    #         reasons.append(f"Multilabel match: {', '.join(overlap)}")
+    #     elif profile.flexibility > 0:
+    #         fallback_boost = min(1.0, 0.35 + profile.flexibility * 0.75)
+    #         boost += fallback_boost
+    #         reasons.append("Flexible fallback matching")
 
-        government = "government_public" in student_label_set
-        hospital_niche = "hospital_niche" in student_label_set
-        independent = "independent_study" in student_label_set
-        internship = "internship" in student_label_set
-        binus_bandung = "binus_bandung" in student_label_set
-        research = "research" in student_label_set
-        network = "network_cloud" in student_label_set
-        entrepreneurship = "entrepreneurship" in student_label_set
-        drone = "iot_embedded" in student_label_set
-        health = "health_medical" in student_label_set
-        game = "game_interactive" in student_label_set
-        banking = "finance_banking" in student_label_set
-        apple = "apple_mobile" in student_label_set
+    #     government = "government_public" in student_label_set
+    #     hospital_niche = "hospital_niche" in student_label_set
+    #     independent = "independent_study" in student_label_set
+    #     internship = "internship" in student_label_set
+    #     binus_bandung = "binus_bandung" in student_label_set
+    #     research = "research" in student_label_set
+    #     network = "network_cloud" in student_label_set
+    #     entrepreneurship = "entrepreneurship" in student_label_set
+    #     drone = "iot_embedded" in student_label_set
+    #     health = "health_medical" in student_label_set
+    #     game = "game_interactive" in student_label_set
+    #     banking = "finance_banking" in student_label_set
+    #     apple = "apple_mobile" in student_label_set
 
-        if government:
-            if profile.code in GOVERNMENT_NICHE_SPECIALIST_CODES:
-                boost += 4.2; reasons.append("Government niche specialist")
-            else:
-                boost -= 18.0; reasons.append("Government niche non-specialist penalty")
-        if hospital_niche:
-            if profile.code in HOSPITAL_NICHE_SPECIALIST_CODES:
-                boost += 4.8; reasons.append("Hospital niche specialist")
-            else:
-                boost -= 20.0; reasons.append("Hospital niche non-specialist penalty")
-        if independent and "independent_study" in profile_labels:
-            boost += 1.2; reasons.append("Independent study alignment")
-        if internship and "internship" in profile_labels:
-            boost += 1.0; reasons.append("Internship alignment")
-        if binus_bandung and "binus_bandung" in profile_labels:
-            boost += 0.8; reasons.append("BINUS Bandung context")
-        if research and "research" in profile_labels:
-            research_boost = 1.2
-            if profile.code == "D6184":
-                research_boost += 1.4; reasons.append("Research priority (Haldi)")
-            boost += research_boost
-        if (network or entrepreneurship) and {"network_cloud", "entrepreneurship"} & profile_labels:
-            network_boost = 1.2
-            if profile.code == "D1749":
-                network_boost += 0.9; reasons.append("Network/entrepreneurship affinity (Johan)")
-            elif profile.code == "D2211":
-                network_boost += 0.6; reasons.append("Network/entrepreneurship support (Abdul Haris)")
-            boost += network_boost
-        if (drone or government) and {"iot_embedded", "government_public"} & profile_labels:
-            boost += 1.6; reasons.append("IoT/government specialization")
-        if health and "health_medical" in profile_labels:
-            boost += 2.0; reasons.append("Health specialization")
-        if game and "game_interactive" in profile_labels:
-            boost += 2.0; reasons.append("Games specialization")
-        if banking and "finance_banking" in profile_labels:
-            boost += 2.0; reasons.append("Banking specialization")
-        if apple and "apple_mobile" in profile_labels:
-            boost += 2.2; reasons.append("Apple Academy specialization")
-        # === END HARDCODED FALLBACK ===
+    #     if government:
+    #         if profile.code in GOVERNMENT_NICHE_SPECIALIST_CODES:
+    #             boost += 4.2; reasons.append("Government niche specialist")
+    #         else:
+    #             boost -= 18.0; reasons.append("Government niche non-specialist penalty")
+    #     if hospital_niche:
+    #         if profile.code in HOSPITAL_NICHE_SPECIALIST_CODES:
+    #             boost += 4.8; reasons.append("Hospital niche specialist")
+    #         else:
+    #             boost -= 20.0; reasons.append("Hospital niche non-specialist penalty")
+    #     if independent and "independent_study" in profile_labels:
+    #         boost += 1.2; reasons.append("Independent study alignment")
+    #     if internship and "internship" in profile_labels:
+    #         boost += 1.0; reasons.append("Internship alignment")
+    #     if binus_bandung and "binus_bandung" in profile_labels:
+    #         boost += 0.8; reasons.append("BINUS Bandung context")
+    #     if research and "research" in profile_labels:
+    #         research_boost = 1.2
+    #         if profile.code == "D6184":
+    #             research_boost += 1.4; reasons.append("Research priority (Haldi)")
+    #         boost += research_boost
+    #     if (network or entrepreneurship) and {"network_cloud", "entrepreneurship"} & profile_labels:
+    #         network_boost = 1.2
+    #         if profile.code == "D1749":
+    #             network_boost += 0.9; reasons.append("Network/entrepreneurship affinity (Johan)")
+    #         elif profile.code == "D2211":
+    #             network_boost += 0.6; reasons.append("Network/entrepreneurship support (Abdul Haris)")
+    #         boost += network_boost
+    #     if (drone or government) and {"iot_embedded", "government_public"} & profile_labels:
+    #         boost += 1.6; reasons.append("IoT/government specialization")
+    #     if health and "health_medical" in profile_labels:
+    #         boost += 2.0; reasons.append("Health specialization")
+    #     if game and "game_interactive" in profile_labels:
+    #         boost += 2.0; reasons.append("Games specialization")
+    #     if banking and "finance_banking" in profile_labels:
+    #         boost += 2.0; reasons.append("Banking specialization")
+    #     if apple and "apple_mobile" in profile_labels:
+    #         boost += 2.2; reasons.append("Apple Academy specialization")
+    #     # === END HARDCODED FALLBACK ===
 
     # --- Always-on rules (not moved to DB) ---
     binus_internal = "binus_internal_internship" in student_label_set

@@ -24,7 +24,6 @@
           <a class="nav-link {{ 'active' if request.endpoint in ['data_center'] else '' }}" href="{{ url_for('data_center') }}">Data Center</a>
           <a class="nav-link {{ 'active' if request.endpoint in ['runs_history', 'run_detail', 'run_recommendations'] else '' }}" href="{{ url_for('runs_history') }}">Run History</a>
           <a class="nav-link {{ 'active' if request.endpoint in ['supervisors_page'] else '' }}" href="{{ url_for('supervisors_page') }}">Supervisor Studio</a>
-          <a class="nav-link {{ 'active' if request.endpoint in ['benchmark_page'] else '' }}" href="{{ url_for('benchmark_page') }}">Benchmark</a>
           <a class="nav-link {{ 'active' if request.endpoint in ['rules_studio', 'update_label_description', 'reset_label_description_route', 'preview_label_score', 'update_affinity_cells', 'reset_affinity_matrix_route'] else '' }}" href="{{ url_for('rules_studio') }}">Rules Studio</a>
         </nav>
 

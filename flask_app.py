@@ -517,12 +517,14 @@ def export_run(run_id: int):
         flash(f"Gagal export Excel: {exc}", "error")
         return redirect(url_for("run_detail", run_id=run_id))
 
-    return send_file(
+    response = send_file(
         io.BytesIO(content),
         as_attachment=True,
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+    response.headers["Content-Length"] = len(content)
+    return response
 
 
 @app.route("/export/<int:run_id>", methods=["GET"])
