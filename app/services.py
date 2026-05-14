@@ -39,36 +39,12 @@ from app.models import (
     SupervisorLabelAffinity,
 )
 from app.recommender import RunOverrides, generate_recommendations
-from app.rules import LABEL_TERMS, SUPERVISOR_PROFILES, normalize_text, student_document, student_labels
+from app.rules import normalize_text, student_document, student_labels
 from app.schemas import SupervisorProfile
-
-PROFILE_TOKEN_STOPWORDS = {
-    "and",
-    "for",
-    "the",
-    "with",
-    "from",
-    "yang",
-    "dan",
-    "dengan",
-    "pada",
-    "atau",
-    "untuk",
-    "internship",
-    "independent",
-    "study",
-    "specific",
-    "company",
-    "project",
-    "application",
-    "developer",
-    "software",
-    "system",
-    "program",
-    "onsite",
-    "hybrid",
-    "wfo",
-}
+from datasets.seed_dataset.label_descriptions import DEFAULT_LABEL_DESCRIPTIONS
+from datasets.seed_dataset.label_terms import LABEL_TERMS
+from datasets.seed_dataset.seeder import seed_affinity_matrix
+from datasets.seed_dataset.stopwords import PROFILE_TOKEN_STOPWORDS
 
 DEFAULT_CATEGORY_SUGGESTIONS = tuple(
     sorted({label.replace("_", " ") for label in LABEL_TERMS.keys()})
@@ -102,78 +78,6 @@ def _ensure_recommendation_run_schema() -> None:
 
 def _normalize_supervisor_code(value: str) -> str:
     return str(value or "").strip().upper()
-
-
-def seed_supervisors(session: Session) -> int:
-    profile_by_code = {profile.code: profile for profile in SUPERVISOR_PROFILES}
-    existing = {
-        supervisor.code: supervisor
-        for supervisor in queries.get_all_supervisors(session)
-    }
-    student_supervisor_map: dict[str, str] = {}
-    for code_raw, name_raw in queries.get_current_supervisor_codes_names(session):
-        code = str(code_raw or "").strip()
-        if not code:
-            continue
-        name = str(name_raw or "").strip()
-        if code not in student_supervisor_map or not student_supervisor_map[code]:
-            student_supervisor_map[code] = name
-
-    changes = 0
-    for code, profile in profile_by_code.items():
-        keywords = ", ".join(profile.keywords)
-        if code in existing:
-            supervisor = existing[code]
-            changed = False
-            if not supervisor.name:
-                supervisor.name = profile.name
-                changed = True
-            if not (supervisor.profile_keywords or "").strip():
-                supervisor.profile_keywords = keywords
-                changed = True
-            if not supervisor.is_active:
-                supervisor.is_active = True
-                changed = True
-            if changed:
-                changes += 1
-        else:
-            session.add(
-                Supervisor(
-                    code=profile.code,
-                    name=profile.name,
-                    profile_keywords=keywords,
-                    is_active=True,
-                )
-            )
-            changes += 1
-
-    # Keep historical supervisors active so scope dosen tidak sempit pada list statis.
-    for code, history_name in student_supervisor_map.items():
-        if code in profile_by_code:
-            continue
-        display_name = history_name or code
-        if code in existing:
-            supervisor = existing[code]
-            if not supervisor.is_active or not supervisor.name:
-                supervisor.is_active = True
-                supervisor.name = display_name
-                changes += 1
-        else:
-            session.add(
-                Supervisor(
-                    code=code,
-                    name=display_name,
-                    profile_keywords="",
-                    is_active=True,
-                )
-            )
-            changes += 1
-
-    # Keep non-static supervisors active to support flexible manual additions from web.
-
-    if changes:
-        session.commit()
-    return changes
 
 
 def _normalize_username(value: str) -> str:
@@ -398,54 +302,13 @@ def export_supervisor_configuration_excel(session: Session) -> tuple[bytes, str]
     return output.read(), "supervisor_config_export.xlsx"
 
 
-_DEFAULT_LABEL_DESCRIPTIONS: list[tuple[str, str, float, bool]] = [
-    ("government_public",  "student doing internship at a government ministry or public sector institution", 0.50, True),
-    ("hospital_niche",     "student working at a hospital clinic or medical center providing health services", 0.50, True),
-    ("health_medical",     "student working in a healthcare or medical technology context", 0.42, False),
-    ("game_interactive",   "student building a game or interactive media application using Unity or Unreal", 0.45, False),
-    ("finance_banking",    "student doing internship at a bank or financial technology or perbankan company", 0.45, False),
-    ("apple_mobile",       "student in Apple Developer Academy building iOS applications with Swift", 0.50, False),
-    ("independent_study",  "student enrolled in a specific independent study or studi independent program", 0.45, False),
-    ("internship",         "student doing a company internship or magang program", 0.40, False),
-    ("research",           "student doing research fellowship or certified research project", 0.45, False),
-    ("binus_bandung",      "student at BINUS University School of Computer Science Bandung campus", 0.45, False),
-    ("binus_internal_internship", "student doing internship internally within BINUS University or Apple Developer Academy", 0.45, False),
-    ("network_cloud",      "student working on network infrastructure cloud computing or IT operations", 0.42, False),
-    ("entrepreneurship",   "student involved in startup business venture or entrepreneurship program", 0.42, False),
-    ("iot_embedded",       "student building IoT embedded system microcontroller sensor or drone project", 0.45, False),
-    ("data_ai",            "student doing data science machine learning analytics or AI project", 0.42, False),
-    ("web_fullstack",      "student building web application frontend backend or full stack system", 0.40, False),
-    ("software_engineering", "student developing software application or engineering system", 0.38, False),
-    ("education",          "student working in an education technology or academic learning platform", 0.45, False),
-    ("cyber_security",     "student doing cybersecurity penetration testing or information security work", 0.50, False),
-]
-
-
-def seed_label_descriptions(session: Session) -> int:
-    existing = queries.get_existing_label_names(session)
-    changes = 0
-    for label_name, description, threshold, is_niche in _DEFAULT_LABEL_DESCRIPTIONS:
-        if label_name in existing:
-            continue
-        session.add(LabelDescription(
-            label_name=label_name,
-            description=description,
-            threshold=threshold,
-            is_niche=is_niche,
-        ))
-        changes += 1
-    if changes:
-        session.commit()
-    return changes
-
-
 def load_label_descriptions(session: Session) -> list[dict]:
     rows = queries.get_all_label_descriptions(session)
 
     if not rows:
         return [
             {"label_name": n, "description": d, "threshold": t, "is_niche": nf}
-            for n, d, t, nf in _DEFAULT_LABEL_DESCRIPTIONS
+            for n, d, t, nf in DEFAULT_LABEL_DESCRIPTIONS
         ]
 
     return [
@@ -482,7 +345,7 @@ def save_label_description(
 
 
 def reset_label_description(session: Session, label_name: str) -> None:
-    for n, d, t, nf in _DEFAULT_LABEL_DESCRIPTIONS:
+    for n, d, t, nf in DEFAULT_LABEL_DESCRIPTIONS:
         if n == label_name:
             save_label_description(session, label_name=n, description=d, threshold=t, is_niche=nf)
             return
@@ -491,81 +354,6 @@ def reset_label_description(session: Session, label_name: str) -> None:
 
 def list_students_for_preview(session: Session) -> list[dict]:
     return [{"student_id": r[0], "name": r[1]} for r in queries.get_students_preview(session)]
-
-
-def seed_affinity_matrix(session: Session) -> int:
-    if queries.count_affinity_rows(session) > 0:
-        return 0
-
-    supervisor_id_by_code = queries.get_supervisor_code_id_map(session)
-
-    rows_to_seed: list[tuple[str | None, str, float, bool]] = [
-        ("D6407", "government_public", 4.2, False),
-        (None,    "government_public", -18.0, True),
-        ("D6274", "hospital_niche", 4.8, False),
-        (None,    "hospital_niche", -20.0, True),
-        ("D6184", "research", 2.6, False),
-        ("D7187", "research", 1.2, False),
-        ("D5918", "research", 1.2, False),
-        ("D6532", "research", 1.2, False),
-        ("D6407", "research", 1.2, False),
-        ("D6274", "research", 1.2, False),
-        ("D7055", "research", 1.2, False),
-        ("D1749", "network_cloud", 2.1, False),
-        ("D2211", "network_cloud", 1.8, False),
-        ("D6407", "network_cloud", 1.2, False),
-        ("D1749", "entrepreneurship", 2.1, False),
-        ("D2211", "entrepreneurship", 1.8, False),
-        ("D6469", "game_interactive", 2.0, False),
-        ("D6836", "finance_banking", 2.0, False),
-        ("D6408", "apple_mobile", 2.2, False),
-        ("D6274", "health_medical", 2.0, False),
-        ("D6407", "iot_embedded", 1.6, False),
-        ("D6184", "iot_embedded", 1.6, False),
-        ("D6670", "independent_study", 1.2, False),
-        ("D7187", "independent_study", 1.2, False),
-        ("D5918", "independent_study", 1.2, False),
-        ("D6532", "independent_study", 1.2, False),
-        ("D7055", "independent_study", 1.2, False),
-        ("D6670", "internship", 1.0, False),
-        ("D7187", "internship", 1.0, False),
-        ("D5918", "internship", 1.0, False),
-        ("D6532", "internship", 1.0, False),
-        ("D2211", "internship", 1.0, False),
-        ("D1749", "internship", 1.0, False),
-        ("D6826", "internship", 1.0, False),
-        ("D6836", "internship", 1.0, False),
-        ("D6670", "binus_bandung", 0.8, False),
-        ("D7187", "binus_bandung", 0.8, False),
-        ("D6670", "binus_internal_internship", 2.6, False),
-        ("D7187", "binus_internal_internship", 2.6, False),
-        ("D5918", "binus_internal_internship", 2.6, False),
-        ("D6532", "binus_internal_internship", 2.6, False),
-        ("D6469", "binus_internal_internship", 2.6, False),
-        ("D6408", "binus_internal_internship", 2.6, False),
-        ("D6826", "binus_internal_internship", 2.6, False),
-        ("D6184", "binus_internal_internship", 2.6, False),
-        ("D2211", "binus_internal_internship", 2.6, False),
-        ("D1749", "binus_internal_internship", 2.6, False),
-        ("D6274", "binus_internal_internship", 1.6, False),
-        ("D6407", "binus_internal_internship", 1.6, False),
-        ("D6836", "binus_internal_internship", 1.6, False),
-        ("D7055", "binus_internal_internship", 1.6, False),
-    ]
-
-    for code, label_name, boost_value, is_niche_penalty in rows_to_seed:
-        supervisor_id = supervisor_id_by_code.get(code) if code else None
-        if code and supervisor_id is None:
-            continue
-        session.add(SupervisorLabelAffinity(
-            supervisor_id=supervisor_id,
-            label_name=label_name,
-            boost_value=boost_value,
-            is_niche_penalty=is_niche_penalty,
-        ))
-
-    session.commit()
-    return len(rows_to_seed)
 
 
 def load_affinity_lookup(session: Session) -> tuple[dict[tuple[str, str], float], dict[str, float]]:
@@ -685,10 +473,8 @@ def import_students_from_bytes(
 
 def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
     supervisors = queries.get_active_supervisors_with_categories(session)
-    profile_lookup = {profile.code: profile for profile in SUPERVISOR_PROFILES}
     profiles: list[SupervisorProfile] = []
     for supervisor in supervisors:
-        static_profile = profile_lookup.get(supervisor.code)
         db_keywords = tuple(
             value.strip()
             for value in (supervisor.profile_keywords or "").split(",")
@@ -708,30 +494,13 @@ def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
             for label in (_category_to_label(category) for category in categories)
             if label
         )
-
-        if static_profile is None:
-            merged_keywords = tuple(dict.fromkeys([*db_keywords, *categories]))
-            profile = SupervisorProfile(
-                code=supervisor.code,
-                name=supervisor.name,
-                keywords=merged_keywords,
-                labels=tuple(dict.fromkeys([*category_labels, "general_flexible"])),
-            )
-            profiles.append(profile)
-            continue
-
-        merged_keywords = tuple(
-            dict.fromkeys([*static_profile.keywords, *db_keywords, *categories])
-        )
-        merged_labels = tuple(
-            dict.fromkeys([*static_profile.labels, *category_labels])
-        )
+        labels = tuple(dict.fromkeys([*category_labels, "general_flexible"])) if not category_labels else category_labels
         profiles.append(
             SupervisorProfile(
-                code=static_profile.code,
-                name=supervisor.name or static_profile.name,
-                keywords=merged_keywords,
-                labels=merged_labels,
+                code=supervisor.code,
+                name=supervisor.name,
+                keywords=tuple(dict.fromkeys([*db_keywords, *categories])),
+                labels=labels,
             )
         )
 
@@ -833,7 +602,6 @@ def generate_and_store_recommendations(
             enable_group_bonus=ENABLE_GROUP_BONUS,
             enable_extra_docs=ENABLE_EXTRA_DOCS,
         )
-    seed_supervisors(session)
     student_payload = _students_for_recommender(session)
     if not student_payload:
         raise ValueError("Belum ada data mahasiswa. Import Excel terlebih dahulu.")

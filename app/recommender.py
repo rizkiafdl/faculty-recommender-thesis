@@ -18,14 +18,12 @@ from app.config import (
     TARGET_MIN_CAPACITY,
 )
 from app.rules import (
-    SUPERVISOR_PROFILES,
     detect_labels_semantic,
     evaluate_rule_boost,
     normalize_text,
     profile_document,
     student_document,
 )
-
 from app.schemas import CapacityPlan, SupervisorProfile, RecommendationItem, RecommendationOutput, RunOverrides
 
 
@@ -241,7 +239,7 @@ def _solve_assignment(
 
 def generate_recommendations(
     students: list[dict[str, Any]],
-    supervisor_profiles: tuple[SupervisorProfile, ...] = SUPERVISOR_PROFILES,
+    supervisor_profiles: tuple[SupervisorProfile, ...],
     label_descriptions: list[dict] | None = None,
     affinity_index: dict[tuple[str, str], float] | None = None,
     niche_defaults: dict[str, float] | None = None,
