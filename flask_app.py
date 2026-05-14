@@ -6,13 +6,25 @@ import os
 from functools import wraps
 from pathlib import Path
 
-from flask import Flask, flash, g, redirect, render_template, request, send_file, session as web_session, url_for
+import threading
+
+from flask import Flask, flash, g, jsonify, redirect, render_template, request, send_file, session as web_session, url_for
 from sqlalchemy import func, select
 
-from app.config import DEFAULT_EXCEL_PATH, DEFAULT_SHEET_NAME
+from app.config import (
+    AVAILABLE_EMBEDDING_MODELS,
+    DEFAULT_EXCEL_PATH,
+    DEFAULT_SHEET_NAME,
+    EMBEDDING_MODEL_NAME,
+    EMBEDDING_TASK,
+    ENABLE_EXTRA_DOCS,
+    ENABLE_GROUP_BONUS,
+    ENABLE_RULE_BOOST,
+)
 from app.database import SessionLocal
 from app.models import RecommendationRun, Student, Supervisor
-from app.embedding import get_label_embedding_cache  # noqa: F401 — ensures tables created
+from app.embedding import get_label_embedding_cache, get_provider_statuses, warmup_model  # noqa: F401
+from app.recommender import RunOverrides
 from app.services import (
     add_or_update_supervisor,
     assign_supervisor_category,
@@ -59,6 +71,14 @@ def bootstrap() -> None:
 
 
 bootstrap()
+
+# Start loading the default model immediately in the background so it's warm before the first run.
+threading.Thread(
+    target=warmup_model,
+    args=(EMBEDDING_MODEL_NAME,),
+    daemon=True,
+    name="model-warmup",
+).start()
 
 
 def login_required(view_func):
@@ -157,6 +177,19 @@ def inject_auth_context():
     return {
         "current_user": g.get("current_user"),
         "request_path": request.path,
+    }
+
+
+@app.context_processor
+def inject_run_config_context():
+    return {
+        "available_models": AVAILABLE_EMBEDDING_MODELS,
+        "run_config_defaults": {
+            "embedding_model": EMBEDDING_MODEL_NAME,
+            "enable_rule_boost": ENABLE_RULE_BOOST,
+            "enable_group_bonus": ENABLE_GROUP_BONUS,
+            "enable_extra_docs": ENABLE_EXTRA_DOCS,
+        },
     }
 
 
@@ -365,8 +398,20 @@ def import_upload():
 def generate():
     next_url = _safe_next(request.form.get("next"))
     try:
+        model = request.form.get("embedding_model", EMBEDDING_MODEL_NAME)
+        if model not in AVAILABLE_EMBEDDING_MODELS:
+            model = EMBEDDING_MODEL_NAME
+        overrides = RunOverrides(
+            embedding_model=model,
+            embedding_task=EMBEDDING_TASK,
+            enable_rule_boost="enable_rule_boost" in request.form,
+            enable_group_bonus="enable_group_bonus" in request.form,
+            enable_extra_docs="enable_extra_docs" in request.form,
+        )
         with SessionLocal() as session:
-            run = generate_and_store_recommendations(session=session, input_source="flask-ui")
+            run = generate_and_store_recommendations(
+                session=session, input_source="flask-ui", overrides=overrides
+            )
         flash(f"Run rekomendasi berhasil dibuat (run_id={run.id}).", "success")
         if next_url:
             return redirect(next_url)
@@ -472,18 +517,27 @@ def export_run(run_id: int):
         flash(f"Gagal export Excel: {exc}", "error")
         return redirect(url_for("run_detail", run_id=run_id))
 
-    return send_file(
+    response = send_file(
         io.BytesIO(content),
         as_attachment=True,
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+    response.headers["Content-Length"] = len(content)
+    return response
 
 
 @app.route("/export/<int:run_id>", methods=["GET"])
 @login_required
 def export_legacy(run_id: int):
     return redirect(url_for("export_run", run_id=run_id))
+
+@app.route("/api/model-status", methods=["GET"])
+@login_required
+def model_status():
+    statuses = get_provider_statuses(AVAILABLE_EMBEDDING_MODELS)
+    return jsonify(statuses)
+
 
 @app.route("/runs", methods=["GET"])
 @login_required

@@ -1,68 +1,8 @@
 {% extends 'app_base.html' %}
 
 {% block content %}
-  <section class="content-grid-3">
-    <article class="panel reveal delay-1 span-2">
-      <h3>Run Performance Overview</h3>
-      <div class="table-wrap short">
-        <table>
-          <thead>
-            <tr>
-              <th>Run</th>
-              <th>Created</th>
-              <th>Solver</th>
-              <th>Objective</th>
-              <th>Match Rate</th>
-              <th>Hybrid MRR</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in run_rows %}
-              <tr>
-                <td>#{{ item.id }}</td>
-                <td>{{ item.created_at }}</td>
-                <td>{{ item.solver_name or '-' }}</td>
-                <td>{{ '%.3f'|format(item.objective_score or 0) }}</td>
-                <td>{{ '%.3f'|format(item.assignment_match or 0) if item.assignment_match is not none else '-' }}</td>
-                <td>{{ '%.3f'|format(item.hybrid_mrr or 0) if item.hybrid_mrr is not none else '-' }}</td>
-                <td class="actions-inline">
-                  <a href="{{ url_for('run_detail', run_id=item.id) }}">Detail</a>
-                  <a href="{{ url_for('run_recommendations', run_id=item.id) }}">Rows</a>
-                  <a href="{{ url_for('export_run', run_id=item.id) }}">Export</a>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </article>
-
-    <!-- <article class="panel reveal delay-2">
-      <h3>Istilah Penting</h3>
-      <div class="glossary-list">
-        <div>
-          <strong>PuLP Solver</strong>
-          <p>Mesin optimasi linear/integer untuk memilih assignment terbaik dengan constraint kuota dosen.</p>
-        </div>
-        <div>
-          <strong>Objective Score</strong>
-          <p>Total skor yang dimaksimalkan solver dari semua pasangan mahasiswa-dosen terpilih.</p>
-        </div>
-        <div>
-          <strong>Match Rate</strong>
-          <p>Persentase hasil akhir yang sama dengan label referensi <code>current_supervisor_code</code>.</p>
-        </div>
-        <div>
-          <strong>MRR</strong>
-          <p>Kualitas ranking: makin tinggi artinya dosen benar makin sering muncul di posisi atas.</p>
-        </div>
-      </div>
-    </article>
-  </section> -->
-
-  <section class="panel reveal delay-4">
-    <h3>All Runs (Raw)</h3>
+  <section class="panel reveal delay-1">
+    <h3>Run History</h3>
     <div class="table-wrap">
       <table>
         <thead>
@@ -74,11 +14,14 @@
             <th>Model</th>
             <th>Solver</th>
             <th>Objective</th>
+            <th>Match Rate</th>
+            <th>Hybrid MRR</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for run in runs %}
+            {% set item = run_rows[loop.index0] %}
             <tr>
               <td>#{{ run.id }}</td>
               <td>{{ run.created_at }}</td>
@@ -87,6 +30,8 @@
               <td>{{ run.embedding_model or '-' }}</td>
               <td>{{ run.solver_name or '-' }}</td>
               <td>{{ '%.3f'|format(run.objective_score or 0.0) }}</td>
+              <td>{{ '%.3f'|format(item.assignment_match or 0) if item.assignment_match is not none else '-' }}</td>
+              <td>{{ '%.3f'|format(item.hybrid_mrr or 0) if item.hybrid_mrr is not none else '-' }}</td>
               <td class="actions-inline">
                 <a href="{{ url_for('run_detail', run_id=run.id) }}">Detail</a>
                 <a href="{{ url_for('run_recommendations', run_id=run.id) }}">Rows</a>

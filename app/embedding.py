@@ -5,7 +5,7 @@ from threading import Lock
 
 import numpy as np
 
-from app.config import EMBEDDING_DEVICE, EMBEDDING_FALLBACK_MODEL_NAME, EMBEDDING_MODEL_NAME
+from app.config import EMBEDDING_DEVICE, EMBEDDING_MODEL_NAME
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -56,7 +56,8 @@ def _resolve_embedding_device(requested_device: str) -> tuple[str, str | None]:
 
 
 class EmbeddingProvider:
-    def __init__(self) -> None:
+    def __init__(self, model_name: str | None = None) -> None:
+        self._model_name = model_name or EMBEDDING_MODEL_NAME
         self._lock = Lock()
         self._loaded = False
         self._model: SentenceTransformer | None = None
@@ -76,53 +77,35 @@ class EmbeddingProvider:
             self._loaded = True
             return
 
-        errors: list[str] = []
-        for model_name in (EMBEDDING_MODEL_NAME, EMBEDDING_FALLBACK_MODEL_NAME):
-            try:
-                model = SentenceTransformer(model_name_or_path=model_name, device=resolved_device)
-                self._model = model
-                note_parts: list[str] = []
-                if model_name != EMBEDDING_MODEL_NAME:
-                    note_parts.append(
-                        f"Gagal load model utama '{EMBEDDING_MODEL_NAME}', fallback ke '{model_name}'."
-                    )
-                if device_note:
-                    note_parts.append(device_note)
-                self._info = EmbeddingInfo(
-                    backend="sentence-transformers",
-                    model_name=model_name,
-                    note=" ".join(note_parts) if note_parts else None,
-                )
-                self._loaded = True
-                return
-            except Exception as exc:  # pragma: no cover
-                errors.append(f"{model_name}: {exc}")
+        try:
+            model = SentenceTransformer(
+                model_name_or_path=self._model_name,
+                device=resolved_device,
+                trust_remote_code=True,
+            )
+            self._model = model
+            note = device_note
+            self._info = EmbeddingInfo(
+                backend="sentence-transformers",
+                model_name=self._model_name,
+                note=note,
+            )
+            self._loaded = True
+            return
+        except Exception as exc:  # pragma: no cover
+            error_msg = f"{self._model_name}: {exc}"
 
         if HAS_SKLEARN:
-            note_parts = []
-            if errors:
-                note_parts.append("; ".join(errors)[:1000])
-            else:
-                note_parts.append("Fallback ke TF-IDF.")
-            if device_note:
-                note_parts.append(device_note)
             self._info = EmbeddingInfo(
                 backend="tfidf-fallback",
                 model_name="tfidf",
-                note=" ".join(note_parts),
+                note=error_msg[:1000],
             )
         else:
-            note_parts = []
-            if errors:
-                note_parts.append("; ".join(errors)[:1000])
-            else:
-                note_parts.append("Fallback ke token-overlap.")
-            if device_note:
-                note_parts.append(device_note)
             self._info = EmbeddingInfo(
                 backend="token-overlap-fallback",
                 model_name="token-overlap",
-                note=" ".join(note_parts),
+                note=error_msg[:1000],
             )
         self._loaded = True
 
@@ -140,22 +123,24 @@ class EmbeddingProvider:
         assert self._info is not None
         return self._info
 
-    def similarity_matrix(self, source_docs: list[str], target_docs: list[str]) -> np.ndarray:
+    def similarity_matrix(
+        self,
+        source_docs: list[str],
+        target_docs: list[str],
+        task: str = "",
+    ) -> np.ndarray:
         self._ensure_loaded()
 
         if self._model is not None:
-            source_vectors = self._model.encode(
-                source_docs,
+            encode_kwargs: dict = dict(
                 convert_to_numpy=True,
                 normalize_embeddings=True,
                 show_progress_bar=False,
             )
-            target_vectors = self._model.encode(
-                target_docs,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
-                show_progress_bar=False,
-            )
+            if task:
+                encode_kwargs["task"] = task
+            source_vectors = self._model.encode(source_docs, **encode_kwargs)
+            target_vectors = self._model.encode(target_docs, **encode_kwargs)
             return np.matmul(source_vectors, target_vectors.T)
 
         if HAS_SKLEARN:
@@ -176,7 +161,7 @@ class EmbeddingProvider:
                 matrix[i, j] = (len(s_tokens & t_tokens) / len(union)) if union else 0.0
         return matrix
 
-    def encode_batch(self, texts: list[str]) -> "np.ndarray | None":
+    def encode_batch(self, texts: list[str], task: str = "") -> "np.ndarray | None":
         """
         Returns normalized embedding matrix (N×D) if sentence_transformers model is loaded.
         Returns None if TF-IDF or token-overlap fallback is active — caller must use
@@ -185,26 +170,53 @@ class EmbeddingProvider:
         self._ensure_loaded()
         if self._model is None:
             return None
-        return self._model.encode(
-            texts,
+        encode_kwargs: dict = dict(
             convert_to_numpy=True,
             normalize_embeddings=True,
             show_progress_bar=False,
         )
+        if task:
+            encode_kwargs["task"] = task
+        return self._model.encode(texts, **encode_kwargs)
 
 
-_PROVIDER: EmbeddingProvider | None = None
-_PROVIDER_LOCK = Lock()
+_PROVIDERS: dict[str, EmbeddingProvider] = {}
+_PROVIDERS_LOCK = Lock()
 
 
-def get_embedding_provider() -> EmbeddingProvider:
-    global _PROVIDER
-    if _PROVIDER is not None:
-        return _PROVIDER
-    with _PROVIDER_LOCK:
-        if _PROVIDER is None:
-            _PROVIDER = EmbeddingProvider()
-    return _PROVIDER
+def get_embedding_provider(model_name: str | None = None) -> EmbeddingProvider:
+    key = model_name or EMBEDDING_MODEL_NAME
+    if key in _PROVIDERS:
+        return _PROVIDERS[key]
+    with _PROVIDERS_LOCK:
+        if key not in _PROVIDERS:
+            _PROVIDERS[key] = EmbeddingProvider(model_name=key)
+    return _PROVIDERS[key]
+
+
+def get_provider_statuses(model_names: list[str]) -> dict[str, str]:
+    """Returns load status for each model: 'ready' | 'loading' | 'not_loaded' | 'fallback'."""
+    result: dict[str, str] = {}
+    for name in model_names:
+        provider = _PROVIDERS.get(name)
+        if provider is None:
+            result[name] = "not_loaded"
+        elif not provider._loaded:
+            result[name] = "loading"
+        elif provider._model is not None:
+            result[name] = "ready"
+        else:
+            result[name] = "fallback"
+    return result
+
+
+def warmup_model(model_name: str) -> None:
+    """Trigger lazy load of a provider in the current thread (call from a background thread)."""
+    try:
+        provider = get_embedding_provider(model_name)
+        provider._ensure_loaded()
+    except Exception:
+        pass
 
 
 class LabelEmbeddingCache:
