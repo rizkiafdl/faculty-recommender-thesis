@@ -163,9 +163,11 @@ def list_supervisor_profiles_for_web(session: Session) -> list[dict[str, Any]]:
         )
         rows.append(
             {
+                "id": supervisor.id,
                 "code": supervisor.code,
                 "name": supervisor.name,
                 "profile_keywords": supervisor.profile_keywords or "",
+                "is_active": supervisor.is_active,
                 "categories": categories,
                 "categories_text": ", ".join(categories),
             }
