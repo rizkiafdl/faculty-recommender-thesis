@@ -21,29 +21,15 @@
             {% endfor %}
           </datalist>
         </label>
-        <button type="submit" class="accent">Load Supervisor</button>
-        <a href="{{ url_for('export_supervisor_config') }}" class="button-link">Export Config Excel</a>
       </form>
-      <p class="muted">Keyword sekarang diketik satu-satu dalam bentuk chip warna-warni.</p>
     </article>
 
     <article class="panel reveal delay-2">
       <h3>Add Supervisor</h3>
-      <form method="post" action="{{ url_for('add_supervisor') }}" class="stack-form">
-        <label>
-          Kode dosen
-          <input type="text" name="supervisor_code" placeholder="contoh: D9999" required />
-        </label>
-        <label>
-          Nama dosen
-          <input type="text" name="supervisor_name" placeholder="Nama lengkap dosen" required />
-        </label>
-        <label>
-          Keywords awal (pisah koma)
-          <input type="text" name="profile_keywords" placeholder="high gpa, network, entrepreneurship" />
-        </label>
-        <button type="submit" class="accent">Save Supervisor</button>
-      </form>
+      <p class="muted">Tambah dosen baru ke roster.</p>
+      <button type="button" class="accent" onclick="document.getElementById('add-supervisor-modal').showModal()">
+        + Add Supervisor
+      </button>
     </article>
   </section>
 
@@ -174,21 +160,128 @@
       <table>
         <thead>
           <tr>
+            <th>#</th>
             <th>Kode</th>
             <th>Nama</th>
+            <th>Categories</th>
+            <th>Active</th>
             <th>Keywords</th>
           </tr>
         </thead>
         <tbody>
           {% for item in supervisors %}
             <tr>
+              <td>{{ item.id }}</td>
               <td>{{ item.code }}</td>
               <td>{{ item.name }}</td>
-              <td>{{ item.profile_keywords or '-' }}</td>
+              <td>{{ item.categories_text or '-' }}</td>
+              <td>
+                <span class="pipeline-badge {{ 'badge-on' if item.is_active else 'badge-off' }}">
+                  {{ 'Active' if item.is_active else 'Inactive' }}
+                </span>
+              </td>
+              <td>
+                <button
+                  type="button"
+                  class="ghost kw-detail-btn"
+                  data-code="{{ item.code }}"
+                  data-name="{{ item.name | e }}"
+                  data-keywords="{{ item.profile_keywords | e }}"
+                >
+                  Details
+                </button>
+              </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
+
+  <!-- Add Supervisor Modal -->
+  <dialog id="add-supervisor-modal" class="run-config-dialog">
+    <form method="post" action="{{ url_for('add_supervisor') }}">
+      <div class="dialog-header">
+        <h3>Add Supervisor</h3>
+        <button type="button" class="dialog-close" onclick="document.getElementById('add-supervisor-modal').close()">✕</button>
+      </div>
+      <div class="dialog-body">
+        <div class="config-section">
+          <label class="config-label">Kode Dosen</label>
+          <input type="text" name="supervisor_code" placeholder="contoh: D9999" required />
+        </div>
+        <div class="config-section">
+          <label class="config-label">Nama Dosen</label>
+          <input type="text" name="supervisor_name" placeholder="Nama lengkap dosen" required />
+        </div>
+        <div class="config-section">
+          <label class="config-label">Keywords Awal (pisah koma)</label>
+          <input type="text" name="profile_keywords" placeholder="high gpa, network, entrepreneurship" />
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button type="button" class="ghost" onclick="document.getElementById('add-supervisor-modal').close()">Cancel</button>
+        <button type="submit" class="accent">Save Supervisor</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Keywords Detail Modal -->
+  <dialog id="keywords-detail-modal" class="run-config-dialog">
+    <div class="dialog-header">
+      <h3>Keywords — <span id="kd-name"></span></h3>
+      <button type="button" class="dialog-close" onclick="document.getElementById('keywords-detail-modal').close()">✕</button>
+    </div>
+    <div class="dialog-body">
+      <p class="muted" style="margin:0 0 0.5rem">
+        <strong id="kd-code"></strong>
+      </p>
+      <div id="kd-chip-box" class="keyword-chip-box"></div>
+      <p id="kd-empty" class="muted" style="display:none;margin-top:0.5rem">Belum ada keywords.</p>
+    </div>
+    <div class="dialog-footer">
+      <a id="kd-edit-link" class="button-link ghost" href="#">Edit in Studio</a>
+      <button type="button" class="accent" onclick="document.getElementById('keywords-detail-modal').close()">Close</button>
+    </div>
+  </dialog>
+
+  <script>
+    (function () {
+      const modal = document.getElementById('keywords-detail-modal');
+      const nameEl = document.getElementById('kd-name');
+      const codeEl = document.getElementById('kd-code');
+      const chipBox = document.getElementById('kd-chip-box');
+      const emptyEl = document.getElementById('kd-empty');
+      const editLink = document.getElementById('kd-edit-link');
+
+      document.querySelectorAll('.kw-detail-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const code = btn.dataset.code;
+          const name = btn.dataset.name;
+          const keywords = btn.dataset.keywords;
+
+          nameEl.textContent = name;
+          codeEl.textContent = code;
+          editLink.href = '?pick=' + encodeURIComponent(code + ' - ' + name);
+
+          chipBox.innerHTML = '';
+          const tokens = (keywords || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+
+          if (tokens.length === 0) {
+            emptyEl.style.display = '';
+          } else {
+            emptyEl.style.display = 'none';
+            tokens.forEach(function (kw, i) {
+              const chip = document.createElement('span');
+              chip.className = 'keyword-chip k' + (i % 6);
+              chip.textContent = kw;
+              chipBox.appendChild(chip);
+            });
+          }
+
+          modal.showModal();
+        });
+      });
+    })();
+  </script>
 {% endblock %}

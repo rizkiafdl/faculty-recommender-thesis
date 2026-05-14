@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'recommendation.db'}")
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{(BASE_DIR / 'recommendation.db').as_posix()}")
 DEFAULT_EXCEL_PATH = os.getenv(
     "DEFAULT_EXCEL_PATH",
     str(BASE_DIR / "map_2026.xlsx"),

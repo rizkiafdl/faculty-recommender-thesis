@@ -50,9 +50,6 @@ from app.services import (
     reset_label_description,
     save_affinity_cells,
     save_label_description,
-    seed_affinity_matrix,
-    seed_label_descriptions,
-    seed_supervisors,
     summary_by_supervisor,
     update_supervisor_keywords,
 )
@@ -64,10 +61,6 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key")
 
 def bootstrap() -> None:
     init_db()
-    with SessionLocal() as session:
-        seed_supervisors(session)
-        seed_label_descriptions(session)
-        seed_affinity_matrix(session)
 
 
 bootstrap()

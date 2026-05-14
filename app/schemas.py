@@ -1,44 +1,63 @@
 from __future__ import annotations
-
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel
+import numpy as np
 
 
-class ImportResponse(BaseModel):
-    inserted: int
-    updated: int
-    total: int
-    source: str
+@dataclass(frozen=True)
+class SupervisorProfile:
+    code: str
+    name: str
+    keywords: tuple[str, ...]
+    labels: tuple[str, ...] = ()
+
+@dataclass
+class CapacityPlan:
+    min_caps: list[int]
+    max_caps: list[int]
+    relaxed: bool
+    note: str | None
 
 
-class RunResponse(BaseModel):
-    run_id: int
-    created_at: datetime
-    total_students: int
-    total_supervisors: int
-    target_min_capacity: int
-    target_max_capacity: int
-    capacity_relaxed: bool
-    capacity_note: str | None = None
-    solver_name: str | None = None
-    solver_note: str | None = None
-    embedding_backend: str | None = None
-    embedding_model: str | None = None
-    objective_score: float | None = None
+@dataclass
+class RecommendationItem:
+    student: dict[str, Any]
+    supervisor: SupervisorProfile
+    similarity_score: float
+    rule_boost: float
+    group_boost: float
+    final_score: float
+    rule_matches: list[str]
+    company_group_key: str | None
 
 
-class RecommendationListResponse(BaseModel):
-    run_id: int
-    data: list[dict[str, Any]]
+@dataclass
+class RunOverrides:
+    embedding_model: str
+    embedding_task: str
+    enable_rule_boost: bool
+    enable_group_bonus: bool
+    enable_extra_docs: bool
 
 
-class SummaryResponse(BaseModel):
-    run_id: int
-    summary: list[dict[str, Any]]
+@dataclass
+class RecommendationOutput:
+    items: list[RecommendationItem]
+    counts_by_supervisor: dict[str, int]
+    solver_name: str
+    objective_score: float
+    capacity_plan: CapacityPlan
+    solver_note: str | None
+    embedding_backend: str
+    embedding_model: str
+    embedding_note: str | None
+    supervisor_codes: list[str]
+    content_similarity_matrix: np.ndarray
+    hybrid_score_matrix: np.ndarray
 
-
-class EvaluationResponse(BaseModel):
-    run_id: int
-    evaluation: dict[str, Any]
+@dataclass
+class EmbeddingInfo:
+    backend: str
+    model_name: str
+    note: str | None = None
