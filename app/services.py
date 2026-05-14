@@ -39,7 +39,8 @@ from app.models import (
     SupervisorLabelAffinity,
 )
 from app.recommender import RunOverrides, generate_recommendations
-from app.rules import LABEL_TERMS, SUPERVISOR_PROFILES, SupervisorProfile, normalize_text, student_document, student_labels
+from app.rules import LABEL_TERMS, SUPERVISOR_PROFILES, normalize_text, student_document, student_labels
+from app.schemas import SupervisorProfile
 
 PROFILE_TOKEN_STOPWORDS = {
     "and",
@@ -715,7 +716,6 @@ def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
                 name=supervisor.name,
                 keywords=merged_keywords,
                 labels=tuple(dict.fromkeys([*category_labels, "general_flexible"])),
-                flexibility=0.5,
             )
             profiles.append(profile)
             continue
@@ -732,7 +732,6 @@ def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
                 name=supervisor.name or static_profile.name,
                 keywords=merged_keywords,
                 labels=merged_labels,
-                flexibility=static_profile.flexibility,
             )
         )
 
@@ -782,20 +781,12 @@ def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
         merged_keywords = tuple(dict.fromkeys([*profile.keywords, *learned_terms]))
         merged_labels = tuple(dict.fromkeys([*profile.labels, *learned_labels]))
 
-        diversity = len({label for label, freq in label_counter.items() if freq >= 2})
-        flex = profile.flexibility
-        if diversity >= 5:
-            flex = min(0.95, flex + 0.2)
-        elif diversity >= 3:
-            flex = min(0.95, flex + 0.1)
-
         adaptive_profiles.append(
             SupervisorProfile(
                 code=profile.code,
                 name=profile.name,
                 keywords=merged_keywords,
                 labels=merged_labels,
-                flexibility=flex,
             )
         )
 
@@ -911,7 +902,7 @@ def generate_and_store_recommendations(
         capacity_relaxed=output.capacity_plan.relaxed,
         capacity_note=output.capacity_plan.note,
         capacity_bounds_json=json.dumps(capacity_bounds),
-        solver_name=output.solver,
+        solver_name=output.solver_name,
         solver_note="\n".join(note_parts) if note_parts else None,
         embedding_backend=output.embedding_backend,
         embedding_model=output.embedding_model,
@@ -934,7 +925,7 @@ def generate_and_store_recommendations(
                 rule_boost=item.rule_boost,
                 group_boost=item.group_boost,
                 final_score=item.final_score,
-                rule_matches="; ".join(item.reasons),
+                rule_matches="; ".join(item.rule_matches),
                 company_group_key=item.company_group_key,
             )
         )

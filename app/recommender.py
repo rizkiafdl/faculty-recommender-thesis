@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -20,7 +19,6 @@ from app.config import (
 )
 from app.rules import (
     SUPERVISOR_PROFILES,
-    SupervisorProfile,
     detect_labels_semantic,
     evaluate_rule_boost,
     normalize_text,
@@ -28,50 +26,7 @@ from app.rules import (
     student_document,
 )
 
-
-@dataclass
-class CapacityPlan:
-    min_caps: list[int]
-    max_caps: list[int]
-    relaxed: bool
-    note: str | None
-
-
-@dataclass
-class RecommendationItem:
-    student: dict[str, Any]
-    supervisor: SupervisorProfile
-    similarity_score: float
-    rule_boost: float
-    group_boost: float
-    final_score: float
-    reasons: list[str]
-    company_group_key: str | None
-
-
-@dataclass
-class RunOverrides:
-    embedding_model: str
-    embedding_task: str
-    enable_rule_boost: bool
-    enable_group_bonus: bool
-    enable_extra_docs: bool
-
-
-@dataclass
-class RecommendationOutput:
-    items: list[RecommendationItem]
-    counts_by_supervisor: dict[str, int]
-    solver: str
-    objective_score: float
-    capacity_plan: CapacityPlan
-    solver_note: str | None
-    embedding_backend: str
-    embedding_model: str
-    embedding_note: str | None
-    supervisor_codes: list[str]
-    content_similarity_matrix: np.ndarray
-    hybrid_score_matrix: np.ndarray
+from app.schemas import CapacityPlan, SupervisorProfile, RecommendationItem, RecommendationOutput, RunOverrides
 
 
 def _rank_supervisor_indices(codes: list[str]) -> list[int]:
@@ -409,7 +364,7 @@ def generate_recommendations(
                 rule_boost=float(rule_boost[student_idx, int(supervisor_idx)]),
                 group_boost=float(group_boost[student_idx, int(supervisor_idx)]),
                 final_score=float(score_matrix[student_idx, int(supervisor_idx)]),
-                reasons=reasons,
+                rule_matches=reasons,
                 company_group_key=student_company.get(student_idx),
             )
         )
@@ -417,7 +372,7 @@ def generate_recommendations(
     return RecommendationOutput(
         items=items,
         counts_by_supervisor=counts_by_supervisor,
-        solver=solver_name,
+        solver_name=solver_name,
         objective_score=float(objective),
         capacity_plan=capacity_plan,
         solver_note=solver_note,

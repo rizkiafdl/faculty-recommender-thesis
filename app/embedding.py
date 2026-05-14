@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from threading import Lock
 
 import numpy as np
 
 from app.config import EMBEDDING_DEVICE, EMBEDDING_MODEL_NAME
+
+from app.schemas import EmbeddingInfo
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -28,13 +29,6 @@ try:
     HAS_SKLEARN = True
 except Exception:  # pragma: no cover
     HAS_SKLEARN = False
-
-
-@dataclass
-class EmbeddingInfo:
-    backend: str
-    model_name: str
-    note: str | None = None
 
 
 def _resolve_embedding_device(requested_device: str) -> tuple[str, str | None]:

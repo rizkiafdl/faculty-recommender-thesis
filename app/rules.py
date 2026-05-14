@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any, Iterable
 
 from app.config import (
@@ -9,6 +8,7 @@ from app.config import (
     HIGH_GPA_THRESHOLD,
 )
 
+from app.schemas import SupervisorProfile
 
 def normalize_text(value: object) -> str:
     text = "" if value is None else str(value)
@@ -20,14 +20,6 @@ def normalize_text(value: object) -> str:
 def contains_any(text: str, terms: Iterable[str]) -> bool:
     return any(term in text for term in terms)
 
-
-@dataclass(frozen=True)
-class SupervisorProfile:
-    code: str
-    name: str
-    keywords: tuple[str, ...]
-    labels: tuple[str, ...] = ()
-    flexibility: float = 0.0
 
 
 SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
@@ -52,7 +44,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "web_fullstack",
             "general_flexible",
         ),
-        flexibility=0.35,
     ),
     SupervisorProfile(
         code="D7187",
@@ -75,7 +66,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "research",
             "general_flexible",
         ),
-        flexibility=0.4,
     ),
     SupervisorProfile(
         code="D5918",
@@ -97,7 +87,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "data_ai",
             "internship",
         ),
-        flexibility=0.3,
     ),
     SupervisorProfile(
         code="D6532",
@@ -119,7 +108,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "software_engineering",
             "internship",
         ),
-        flexibility=0.3,
     ),
     SupervisorProfile(
         code="D2211",
@@ -141,7 +129,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "software_engineering",
             "general_flexible",
         ),
-        flexibility=0.8,
     ),
     SupervisorProfile(
         code="D1749",
@@ -163,7 +150,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "software_engineering",
             "general_flexible",
         ),
-        flexibility=0.65,
     ),
     SupervisorProfile(
         code="D6407",
@@ -184,7 +170,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "network_cloud",
             "research",
         ),
-        flexibility=0.2,
     ),
     SupervisorProfile(
         code="D6274",
@@ -205,7 +190,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "data_ai",
             "software_engineering",
         ),
-        flexibility=0.15,
     ),
     SupervisorProfile(
         code="D6184",
@@ -227,7 +211,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "software_engineering",
             "general_flexible",
         ),
-        flexibility=0.6,
     ),
     SupervisorProfile(
         code="D6826",
@@ -247,7 +230,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "internship",
             "general_flexible",
         ),
-        flexibility=0.95,
     ),
     SupervisorProfile(
         code="D7055",
@@ -266,7 +248,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "education",
             "general_flexible",
         ),
-        flexibility=0.35,
     ),
     SupervisorProfile(
         code="D6469",
@@ -287,7 +268,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "software_engineering",
             "general_flexible",
         ),
-        flexibility=0.55,
     ),
     SupervisorProfile(
         code="D6836",
@@ -307,7 +287,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "software_engineering",
             "internship",
         ),
-        flexibility=0.25,
     ),
     SupervisorProfile(
         code="D6408",
@@ -328,7 +307,6 @@ SUPERVISOR_PROFILES: tuple[SupervisorProfile, ...] = (
             "education",
             "general_flexible",
         ),
-        flexibility=0.45,
     ),
 )
 
@@ -566,10 +544,8 @@ def evaluate_rule_boost(
     #         overlap_boost = min(5.0, 1.15 * len(overlap))
     #         boost += overlap_boost
     #         reasons.append(f"Multilabel match: {', '.join(overlap)}")
-    #     elif profile.flexibility > 0:
-    #         fallback_boost = min(1.0, 0.35 + profile.flexibility * 0.75)
-    #         boost += fallback_boost
-    #         reasons.append("Flexible fallback matching")
+    #     else:
+    #         pass  # no fallback boost
 
     #     government = "government_public" in student_label_set
     #     hospital_niche = "hospital_niche" in student_label_set
@@ -658,8 +634,5 @@ def evaluate_rule_boost(
             gpa_boost += 1.0
         boost += gpa_boost; reasons.append("High GPA guidance")
 
-    if profile.flexibility > 0:
-        boost += 0.25 + min(0.6, profile.flexibility * 0.5)
-        reasons.append("Flexible guidance slot")
 
     return boost, list(dict.fromkeys(reasons))
