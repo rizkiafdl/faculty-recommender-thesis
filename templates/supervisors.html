@@ -163,7 +163,6 @@
             <th>#</th>
             <th>Kode</th>
             <th>Nama</th>
-            <th>Categories</th>
             <th>Active</th>
             <th>Keywords</th>
           </tr>
@@ -174,7 +173,6 @@
               <td>{{ item.id }}</td>
               <td>{{ item.code }}</td>
               <td>{{ item.name }}</td>
-              <td>{{ item.categories_text or '-' }}</td>
               <td>
                 <span class="pipeline-badge {{ 'badge-on' if item.is_active else 'badge-off' }}">
                   {{ 'Active' if item.is_active else 'Inactive' }}

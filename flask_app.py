@@ -27,7 +27,6 @@ from app.embedding import get_label_embedding_cache, get_provider_statuses, warm
 from app.recommender import RunOverrides
 from app.services import (
     add_or_update_supervisor,
-    assign_supervisor_category,
     authenticate_user,
     evaluation_by_run,
     export_recommendations_excel,
@@ -45,7 +44,6 @@ from app.services import (
     load_affinity_matrix_for_web,
     load_label_descriptions,
     register_user,
-    remove_supervisor_category,
     reset_affinity_matrix,
     reset_label_description,
     save_affinity_cells,
@@ -602,45 +600,6 @@ def add_supervisor():
     except Exception as exc:
         flash(f"Gagal simpan dosen: {exc}", "error")
         return redirect(url_for("supervisors_page"))
-
-
-@app.route("/supervisors/category/add", methods=["POST"])
-@login_required
-def add_supervisor_category():
-    supervisor_code = _parse_supervisor_code(request.form.get("supervisor_code")) or ""
-    category_name = request.form.get("category_name", "")
-    try:
-        with SessionLocal() as session:
-            assign_supervisor_category(
-                session=session,
-                supervisor_code=supervisor_code,
-                category_name=category_name,
-            )
-        flash("Kategori dosen berhasil ditambahkan.", "success")
-    except Exception as exc:
-        flash(f"Gagal menambahkan kategori: {exc}", "error")
-    return redirect(url_for("supervisors_page", code=supervisor_code))
-
-
-@app.route("/supervisors/category/remove", methods=["POST"])
-@login_required
-def delete_supervisor_category():
-    supervisor_code = _parse_supervisor_code(request.form.get("supervisor_code")) or ""
-    category_name = request.form.get("category_name", "")
-    try:
-        with SessionLocal() as session:
-            removed = remove_supervisor_category(
-                session=session,
-                supervisor_code=supervisor_code,
-                category_name=category_name,
-            )
-        if removed:
-            flash("Kategori dosen berhasil dihapus.", "success")
-        else:
-            flash("Kategori tidak ditemukan.", "error")
-    except Exception as exc:
-        flash(f"Gagal menghapus kategori: {exc}", "error")
-    return redirect(url_for("supervisors_page", code=supervisor_code))
 
 
 @app.route("/supervisors/keywords/update", methods=["POST"])
