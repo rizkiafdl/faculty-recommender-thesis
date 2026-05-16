@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app import queries
-from app.models import LabelDescription, Supervisor, SupervisorCategory, SupervisorCategoryAssignment, SupervisorLabelAffinity
+from app.models import LabelDescription, Supervisor, SupervisorLabelAffinity
 from datasets.seed_dataset.affinity_matrix import DEFAULT_AFFINITY_ROWS
 from datasets.seed_dataset.label_descriptions import DEFAULT_LABEL_DESCRIPTIONS
 from datasets.seed_dataset.supervisor_profiles import SUPERVISOR_PROFILES
@@ -118,36 +118,3 @@ def seed_affinity_matrix(session: Session) -> int:
     return len(DEFAULT_AFFINITY_ROWS)
 
 
-def seed_supervisor_categories(session: Session) -> int:
-    supervisor_by_code = {
-        s.code: s for s in queries.get_all_supervisors(session)
-    }
-
-    changes = 0
-    for profile in SUPERVISOR_PROFILES:
-        supervisor = supervisor_by_code.get(profile.code)
-        if supervisor is None:
-            continue
-
-        for label in profile.labels:
-            category_name = label.replace("_", " ")
-
-            category = queries.get_category_by_name(session, category_name)
-            if category is None:
-                category = SupervisorCategory(name=category_name)
-                session.add(category)
-                session.flush()
-
-            existing = queries.get_category_assignment(session, supervisor.id, category.id)
-            if existing is not None:
-                continue
-
-            session.add(SupervisorCategoryAssignment(
-                supervisor_id=supervisor.id,
-                category_id=category.id,
-            ))
-            changes += 1
-
-    if changes:
-        session.commit()
-    return changes
