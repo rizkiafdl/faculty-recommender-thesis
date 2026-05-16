@@ -19,9 +19,6 @@ TARGET_MIN_CAPACITY = int(os.getenv("TARGET_MIN_CAPACITY", "10"))
 TARGET_MAX_CAPACITY = int(os.getenv("TARGET_MAX_CAPACITY", "12"))
 SIMILARITY_WEIGHT = float(os.getenv("SIMILARITY_WEIGHT", "100"))
 COMPANY_GROUP_BONUS = float(os.getenv("COMPANY_GROUP_BONUS", "1.5"))
-ENABLE_RULE_BOOST = os.getenv("ENABLE_RULE_BOOST", "false").lower() == "true"
-ENABLE_GROUP_BONUS = os.getenv("ENABLE_GROUP_BONUS", "true").lower() == "true"
-ENABLE_EXTRA_DOCS = os.getenv("ENABLE_EXTRA_DOCS", "true").lower() == "true"
 HIGH_GPA_THRESHOLD = float(os.getenv("HIGH_GPA_THRESHOLD", "3.8"))
 
 # Transformer embedding settings (content-based recommendation).

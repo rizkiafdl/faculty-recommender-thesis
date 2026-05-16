@@ -15,14 +15,7 @@ from app import queries
 from datasets.map_loader import load_supervisor_extra_docs
 from app.config import (
     DEFAULT_SHEET_NAME,
-    EMBEDDING_MODEL_NAME,
-    EMBEDDING_TASK,
-    ENABLE_EXTRA_DOCS,
-    ENABLE_GROUP_BONUS,
-    ENABLE_RULE_BOOST,
     SIMILARITY_WEIGHT,
-    TARGET_MAX_CAPACITY,
-    TARGET_MIN_CAPACITY,
 )
 from app.database import Base, engine
 from app.evaluation import build_evaluation_payload
@@ -474,17 +467,9 @@ def _students_for_recommender(session: Session) -> list[dict[str, Any]]:
 
 def generate_and_store_recommendations(
     session: Session,
+    overrides: RunOverrides,
     input_source: str = "manual-run",
-    overrides: RunOverrides | None = None,
 ) -> RecommendationRun:
-    if overrides is None:
-        overrides = RunOverrides(
-            embedding_model=EMBEDDING_MODEL_NAME,
-            embedding_task=EMBEDDING_TASK,
-            enable_rule_boost=ENABLE_RULE_BOOST,
-            enable_group_bonus=ENABLE_GROUP_BONUS,
-            enable_extra_docs=ENABLE_EXTRA_DOCS,
-        )
     student_payload = _students_for_recommender(session)
     if not student_payload:
         raise ValueError("Belum ada data mahasiswa. Import Excel terlebih dahulu.")
@@ -536,6 +521,9 @@ def generate_and_store_recommendations(
         "similarity_weight": SIMILARITY_WEIGHT,
         "embedding_model": overrides.embedding_model,
         "embedding_task": overrides.embedding_task,
+        "capacity_priority_codes": overrides.capacity_priority_codes,
+        "target_min_capacity": overrides.target_min_capacity,
+        "target_max_capacity": overrides.target_max_capacity,
     }
 
     note_parts: list[str] = []
@@ -548,8 +536,8 @@ def generate_and_store_recommendations(
         input_source=input_source,
         total_students=len(student_payload),
         total_supervisors=len(profiles),
-        target_min_capacity=TARGET_MIN_CAPACITY,
-        target_max_capacity=TARGET_MAX_CAPACITY,
+        target_min_capacity=overrides.target_min_capacity,
+        target_max_capacity=overrides.target_max_capacity,
         capacity_relaxed=output.capacity_plan.relaxed,
         capacity_note=output.capacity_plan.note,
         capacity_bounds_json=json.dumps(capacity_bounds),
@@ -650,8 +638,8 @@ def summary_by_supervisor(session: Session, run_id: int | None = None) -> tuple[
     summary: list[dict[str, Any]] = []
     for code, name, count in queries.get_supervisor_recommendation_counts(session, resolved_run_id):
         limit = bounds.get(code, {})
-        min_cap = limit.get("min", TARGET_MIN_CAPACITY)
-        max_cap = limit.get("max", TARGET_MAX_CAPACITY)
+        min_cap = limit.get("min")
+        max_cap = limit.get("max")
         within = min_cap <= int(count) <= max_cap
         summary.append(
             {

@@ -13,14 +13,15 @@ from sqlalchemy import func, select
 
 from app.config import (
     AVAILABLE_EMBEDDING_MODELS,
+    CAPACITY_PRIORITY_CODES,
     DEFAULT_EXCEL_PATH,
     DEFAULT_SHEET_NAME,
     EMBEDDING_MODEL_NAME,
     EMBEDDING_TASK,
-    ENABLE_EXTRA_DOCS,
-    ENABLE_GROUP_BONUS,
-    ENABLE_RULE_BOOST,
+    TARGET_MIN_CAPACITY,
+    TARGET_MAX_CAPACITY,
 )
+from app import queries
 from app.database import SessionLocal
 from app.models import RecommendationRun, Student, Supervisor
 from app.embedding import get_label_embedding_cache, get_provider_statuses, warmup_model  # noqa: F401
@@ -177,9 +178,12 @@ def inject_run_config_context():
         "available_models": AVAILABLE_EMBEDDING_MODELS,
         "run_config_defaults": {
             "embedding_model": EMBEDDING_MODEL_NAME,
-            "enable_rule_boost": ENABLE_RULE_BOOST,
-            "enable_group_bonus": ENABLE_GROUP_BONUS,
-            "enable_extra_docs": ENABLE_EXTRA_DOCS,
+            "enable_rule_boost": False,
+            "enable_group_bonus": True,
+            "enable_extra_docs": True,
+            "capacity_priority_codes": CAPACITY_PRIORITY_CODES,
+            "target_min_capacity": TARGET_MIN_CAPACITY,
+            "target_max_capacity": TARGET_MAX_CAPACITY,
         },
     }
 
@@ -392,12 +396,20 @@ def generate():
         model = request.form.get("embedding_model", EMBEDDING_MODEL_NAME)
         if model not in AVAILABLE_EMBEDDING_MODELS:
             model = EMBEDDING_MODEL_NAME
+        selected_priority_codes = request.form.getlist("capacity_priority_code")
+        raw_min = int(request.form.get("target_min_capacity") or TARGET_MIN_CAPACITY)
+        raw_max = int(request.form.get("target_max_capacity") or TARGET_MAX_CAPACITY)
+        target_min = max(1, raw_min)
+        target_max = max(target_min + 1, raw_max)
         overrides = RunOverrides(
             embedding_model=model,
             embedding_task=EMBEDDING_TASK,
             enable_rule_boost="enable_rule_boost" in request.form,
             enable_group_bonus="enable_group_bonus" in request.form,
             enable_extra_docs="enable_extra_docs" in request.form,
+            capacity_priority_codes=selected_priority_codes if selected_priority_codes else list(CAPACITY_PRIORITY_CODES),
+            target_min_capacity=target_min,
+            target_max_capacity=target_max,
         )
         with SessionLocal() as session:
             run = generate_and_store_recommendations(
@@ -528,6 +540,14 @@ def export_legacy(run_id: int):
 def model_status():
     statuses = get_provider_statuses(AVAILABLE_EMBEDDING_MODELS)
     return jsonify(statuses)
+
+
+@app.route("/api/supervisors", methods=["GET"])
+@login_required
+def api_supervisors():
+    with SessionLocal() as session:
+        supervisors = queries.get_active_supervisors_ordered(session)
+    return jsonify([{"code": str(s.code), "name": str(s.name)} for s in supervisors])
 
 
 @app.route("/runs", methods=["GET"])

@@ -123,6 +123,35 @@
               </label>
             </div>
           </div>
+
+          <div class="config-section">
+            <details class="priority-details">
+              <summary class="priority-summary">
+                <span class="config-label">Capacity Priority Supervisors</span>
+                <span class="priority-count" id="priority-count"></span>
+                <span class="priority-chevron">▸</span>
+              </summary>
+              <div class="capacity-bounds">
+                <label class="capacity-bound-field">
+                  <span class="capacity-bound-label">Min slots</span>
+                  <input type="number" name="target_min_capacity" id="cap-min"
+                    value="{{ run_config_defaults.target_min_capacity }}" min="1" max="99"
+                    oninput="validateCapacityBounds()" />
+                </label>
+                <label class="capacity-bound-field">
+                  <span class="capacity-bound-label">Max slots</span>
+                  <input type="number" name="target_max_capacity" id="cap-max"
+                    value="{{ run_config_defaults.target_max_capacity }}" min="2" max="99"
+                    oninput="validateCapacityBounds()" />
+                </label>
+                <span class="capacity-bound-error" id="cap-error"></span>
+              </div>
+              <p class="config-hint">Supervisors yang diprioritaskan untuk menyerap overflow/underflow slot kapasitas.</p>
+              <div class="toggle-grid" id="priority-codes-list">
+                <small class="muted">Loading supervisors…</small>
+              </div>
+            </details>
+          </div>
         </div>
 
         <div class="dialog-footer">
@@ -134,7 +163,62 @@
 
     <script>
       const MODEL_STATUS_URL = "{{ url_for('model_status') }}";
+      const SUPERVISORS_URL = "{{ url_for('api_supervisors') }}";
+      const DEFAULT_PRIORITY_CODES = {{ run_config_defaults.capacity_priority_codes | tojson }};
       let _statusPollInterval = null;
+      let _supervisorsLoaded = false;
+
+      function updatePriorityCount() {
+        const checked = document.querySelectorAll('input[name="capacity_priority_code"]:checked').length;
+        const total = document.querySelectorAll('input[name="capacity_priority_code"]').length;
+        const badge = document.getElementById('priority-count');
+        if (badge) badge.textContent = total ? `${checked} / ${total}` : '';
+      }
+
+      function renderPriorityCodes(supervisors) {
+        const container = document.getElementById('priority-codes-list');
+        if (!container) return;
+        container.innerHTML = supervisors.map(s => {
+          const checked = DEFAULT_PRIORITY_CODES.includes(s.code) ? 'checked' : '';
+          return `<label class="toggle-row">
+            <span class="toggle-name">${s.code}</span>
+            <span class="toggle-desc">${s.name}</span>
+            <div class="toggle-switch">
+              <input type="checkbox" name="capacity_priority_code" value="${s.code}" ${checked} onchange="updatePriorityCount()" />
+              <span class="toggle-slider"></span>
+            </div>
+          </label>`;
+        }).join('');
+        updatePriorityCount();
+      }
+
+      function loadSupervisors() {
+        if (_supervisorsLoaded) return;
+        fetch(SUPERVISORS_URL)
+          .then(r => r.json())
+          .then(data => { renderPriorityCodes(data); _supervisorsLoaded = true; })
+          .catch(() => {
+            const c = document.getElementById('priority-codes-list');
+            if (c) c.innerHTML = '<small class="muted">Gagal memuat daftar dosen.</small>';
+          });
+      }
+
+      function validateCapacityBounds() {
+        const minEl = document.getElementById('cap-min');
+        const maxEl = document.getElementById('cap-max');
+        const errEl = document.getElementById('cap-error');
+        const btn = document.getElementById('run-submit-btn');
+        if (!minEl || !maxEl || !errEl || !btn) return;
+        const minVal = parseInt(minEl.value, 10);
+        const maxVal = parseInt(maxEl.value, 10);
+        if (isNaN(minVal) || isNaN(maxVal) || minVal < 1 || maxVal < 2 || minVal >= maxVal) {
+          errEl.textContent = 'Min harus ≥ 1 dan Max harus > Min.';
+          btn.disabled = true;
+        } else {
+          errEl.textContent = '';
+          updateRunButton();
+        }
+      }
 
       function updateModelOptionStyles() {
         document.querySelectorAll('.model-option').forEach(el => {
@@ -184,6 +268,7 @@
 
       document.getElementById('run-config-modal').addEventListener('toggle', function(e) {
         if (e.newState === 'open') {
+          loadSupervisors();
           pollModelStatus();
           if (!_statusPollInterval) {
             _statusPollInterval = setInterval(pollModelStatus, 2500);
