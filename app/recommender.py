@@ -6,16 +6,8 @@ import numpy as np
 
 from app.embedding import get_embedding_provider
 from app.config import (
-    CAPACITY_PRIORITY_CODES,
     COMPANY_GROUP_BONUS,
-    EMBEDDING_MODEL_NAME,
-    EMBEDDING_TASK,
-    ENABLE_GROUP_BONUS,
-    ENABLE_RULE_BOOST,
-    ENABLE_EXTRA_DOCS,
     SIMILARITY_WEIGHT,
-    TARGET_MAX_CAPACITY,
-    TARGET_MIN_CAPACITY,
 )
 from app.rules import (
     detect_labels_semantic,
@@ -27,16 +19,17 @@ from app.rules import (
 from app.schemas import CapacityPlan, SupervisorProfile, RecommendationItem, RecommendationOutput, RunOverrides
 
 
-def _rank_supervisor_indices(codes: list[str]) -> list[int]:
-    priority = {code: idx for idx, code in enumerate(CAPACITY_PRIORITY_CODES)}
+def _rank_supervisor_indices(codes: list[str], priority_codes: list[str]) -> list[int]:
+    priority = {code: idx for idx, code in enumerate(priority_codes)}
     return sorted(range(len(codes)), key=lambda i: (priority.get(codes[i], 999), i))
 
 
 def _build_capacity_plan(
     supervisor_codes: list[str],
     student_count: int,
-    target_min: int = TARGET_MIN_CAPACITY,
-    target_max: int = TARGET_MAX_CAPACITY,
+    priority_codes: list[str],
+    target_min: int,
+    target_max: int,
 ) -> CapacityPlan:
     supervisor_count = len(supervisor_codes)
     min_caps = [target_min for _ in supervisor_codes]
@@ -44,7 +37,7 @@ def _build_capacity_plan(
     relaxed = False
     notes: list[str] = []
 
-    ranked = _rank_supervisor_indices(supervisor_codes)
+    ranked = _rank_supervisor_indices(supervisor_codes, priority_codes)
 
     max_total = sum(max_caps)
     if student_count > max_total:
@@ -240,21 +233,12 @@ def _solve_assignment(
 def generate_recommendations(
     students: list[dict[str, Any]],
     supervisor_profiles: tuple[SupervisorProfile, ...],
+    overrides: RunOverrides,
     label_descriptions: list[dict] | None = None,
     affinity_index: dict[tuple[str, str], float] | None = None,
     niche_defaults: dict[str, float] | None = None,
     extra_supervisor_docs: dict[str, str] | None = None,
-    overrides: RunOverrides | None = None,
 ) -> RecommendationOutput:
-    if overrides is None:
-        overrides = RunOverrides(
-            embedding_model=EMBEDDING_MODEL_NAME,
-            embedding_task=EMBEDDING_TASK,
-            enable_rule_boost=ENABLE_RULE_BOOST,
-            enable_group_bonus=ENABLE_GROUP_BONUS,
-            enable_extra_docs=ENABLE_EXTRA_DOCS,
-        )
-
     if not students:
         raise ValueError("Data mahasiswa kosong.")
     if not supervisor_profiles:
@@ -312,6 +296,7 @@ def generate_recommendations(
                     active_labels=student_active_labels[i],
                     affinity_index=affinity_index or {},
                     niche_defaults=niche_defaults or {},
+                    capacity_priority_codes=overrides.capacity_priority_codes,
                 )
                 rule_boost[i, j] = boost
                 if reasons:
@@ -329,6 +314,9 @@ def generate_recommendations(
     capacity_plan = _build_capacity_plan(
         supervisor_codes=supervisor_codes,
         student_count=student_count,
+        priority_codes=overrides.capacity_priority_codes,
+        target_min=overrides.target_min_capacity,
+        target_max=overrides.target_max_capacity,
     )
 
     solver_note: str | None = None

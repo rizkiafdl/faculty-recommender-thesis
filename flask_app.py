@@ -13,21 +13,21 @@ from sqlalchemy import func, select
 
 from app.config import (
     AVAILABLE_EMBEDDING_MODELS,
+    CAPACITY_PRIORITY_CODES,
     DEFAULT_EXCEL_PATH,
     DEFAULT_SHEET_NAME,
     EMBEDDING_MODEL_NAME,
     EMBEDDING_TASK,
-    ENABLE_EXTRA_DOCS,
-    ENABLE_GROUP_BONUS,
-    ENABLE_RULE_BOOST,
+    TARGET_MIN_CAPACITY,
+    TARGET_MAX_CAPACITY,
 )
+from app import queries
 from app.database import SessionLocal
 from app.models import RecommendationRun, Student, Supervisor
 from app.embedding import get_label_embedding_cache, get_provider_statuses, warmup_model  # noqa: F401
 from app.recommender import RunOverrides
 from app.services import (
     add_or_update_supervisor,
-    assign_supervisor_category,
     authenticate_user,
     evaluation_by_run,
     export_recommendations_excel,
@@ -45,7 +45,6 @@ from app.services import (
     load_affinity_matrix_for_web,
     load_label_descriptions,
     register_user,
-    remove_supervisor_category,
     reset_affinity_matrix,
     reset_label_description,
     save_affinity_cells,
@@ -179,9 +178,12 @@ def inject_run_config_context():
         "available_models": AVAILABLE_EMBEDDING_MODELS,
         "run_config_defaults": {
             "embedding_model": EMBEDDING_MODEL_NAME,
-            "enable_rule_boost": ENABLE_RULE_BOOST,
-            "enable_group_bonus": ENABLE_GROUP_BONUS,
-            "enable_extra_docs": ENABLE_EXTRA_DOCS,
+            "enable_rule_boost": False,
+            "enable_group_bonus": True,
+            "enable_extra_docs": True,
+            "capacity_priority_codes": CAPACITY_PRIORITY_CODES,
+            "target_min_capacity": TARGET_MIN_CAPACITY,
+            "target_max_capacity": TARGET_MAX_CAPACITY,
         },
     }
 
@@ -394,12 +396,20 @@ def generate():
         model = request.form.get("embedding_model", EMBEDDING_MODEL_NAME)
         if model not in AVAILABLE_EMBEDDING_MODELS:
             model = EMBEDDING_MODEL_NAME
+        selected_priority_codes = request.form.getlist("capacity_priority_code")
+        raw_min = int(request.form.get("target_min_capacity") or TARGET_MIN_CAPACITY)
+        raw_max = int(request.form.get("target_max_capacity") or TARGET_MAX_CAPACITY)
+        target_min = max(1, raw_min)
+        target_max = max(target_min + 1, raw_max)
         overrides = RunOverrides(
             embedding_model=model,
             embedding_task=EMBEDDING_TASK,
             enable_rule_boost="enable_rule_boost" in request.form,
             enable_group_bonus="enable_group_bonus" in request.form,
             enable_extra_docs="enable_extra_docs" in request.form,
+            capacity_priority_codes=selected_priority_codes if selected_priority_codes else list(CAPACITY_PRIORITY_CODES),
+            target_min_capacity=target_min,
+            target_max_capacity=target_max,
         )
         with SessionLocal() as session:
             run = generate_and_store_recommendations(
@@ -532,6 +542,14 @@ def model_status():
     return jsonify(statuses)
 
 
+@app.route("/api/supervisors", methods=["GET"])
+@login_required
+def api_supervisors():
+    with SessionLocal() as session:
+        supervisors = queries.get_active_supervisors_ordered(session)
+    return jsonify([{"code": str(s.code), "name": str(s.name)} for s in supervisors])
+
+
 @app.route("/runs", methods=["GET"])
 @login_required
 def runs_history():
@@ -602,45 +620,6 @@ def add_supervisor():
     except Exception as exc:
         flash(f"Gagal simpan dosen: {exc}", "error")
         return redirect(url_for("supervisors_page"))
-
-
-@app.route("/supervisors/category/add", methods=["POST"])
-@login_required
-def add_supervisor_category():
-    supervisor_code = _parse_supervisor_code(request.form.get("supervisor_code")) or ""
-    category_name = request.form.get("category_name", "")
-    try:
-        with SessionLocal() as session:
-            assign_supervisor_category(
-                session=session,
-                supervisor_code=supervisor_code,
-                category_name=category_name,
-            )
-        flash("Kategori dosen berhasil ditambahkan.", "success")
-    except Exception as exc:
-        flash(f"Gagal menambahkan kategori: {exc}", "error")
-    return redirect(url_for("supervisors_page", code=supervisor_code))
-
-
-@app.route("/supervisors/category/remove", methods=["POST"])
-@login_required
-def delete_supervisor_category():
-    supervisor_code = _parse_supervisor_code(request.form.get("supervisor_code")) or ""
-    category_name = request.form.get("category_name", "")
-    try:
-        with SessionLocal() as session:
-            removed = remove_supervisor_category(
-                session=session,
-                supervisor_code=supervisor_code,
-                category_name=category_name,
-            )
-        if removed:
-            flash("Kategori dosen berhasil dihapus.", "success")
-        else:
-            flash("Kategori tidak ditemukan.", "error")
-    except Exception as exc:
-        flash(f"Gagal menghapus kategori: {exc}", "error")
-    return redirect(url_for("supervisors_page", code=supervisor_code))
 
 
 @app.route("/supervisors/keywords/update", methods=["POST"])

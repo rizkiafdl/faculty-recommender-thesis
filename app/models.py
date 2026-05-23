@@ -28,11 +28,6 @@ class Supervisor(Base):
     is_active = Column(Boolean, nullable=False, default=True)
 
     recommendations = relationship("Recommendation", back_populates="supervisor")
-    category_links = relationship(
-        "SupervisorCategoryAssignment",
-        back_populates="supervisor",
-        cascade="all, delete-orphan",
-    )
 
 
 class AppUser(Base):
@@ -43,35 +38,6 @@ class AppUser(Base):
     full_name = Column(String(255), nullable=True)
     password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-
-
-class SupervisorCategory(Base):
-    __tablename__ = "supervisor_categories"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String(128), unique=True, nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-
-    supervisor_links = relationship(
-        "SupervisorCategoryAssignment",
-        back_populates="category",
-        cascade="all, delete-orphan",
-    )
-
-
-class SupervisorCategoryAssignment(Base):
-    __tablename__ = "supervisor_category_assignments"
-    __table_args__ = (
-        UniqueConstraint("supervisor_id", "category_id", name="uq_supervisor_category"),
-    )
-
-    id = Column(Integer, primary_key=True)
-    supervisor_id = Column(Integer, ForeignKey("supervisors.id"), nullable=False, index=True)
-    category_id = Column(Integer, ForeignKey("supervisor_categories.id"), nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-
-    supervisor = relationship("Supervisor", back_populates="category_links")
-    category = relationship("SupervisorCategory", back_populates="supervisor_links")
 
 
 class LabelDescription(Base):

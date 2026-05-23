@@ -15,14 +15,7 @@ from app import queries
 from datasets.map_loader import load_supervisor_extra_docs
 from app.config import (
     DEFAULT_SHEET_NAME,
-    EMBEDDING_MODEL_NAME,
-    EMBEDDING_TASK,
-    ENABLE_EXTRA_DOCS,
-    ENABLE_GROUP_BONUS,
-    ENABLE_RULE_BOOST,
     SIMILARITY_WEIGHT,
-    TARGET_MAX_CAPACITY,
-    TARGET_MIN_CAPACITY,
 )
 from app.database import Base, engine
 from app.evaluation import build_evaluation_payload
@@ -34,21 +27,14 @@ from app.models import (
     RecommendationRun,
     Student,
     Supervisor,
-    SupervisorCategory,
-    SupervisorCategoryAssignment,
     SupervisorLabelAffinity,
 )
 from app.recommender import RunOverrides, generate_recommendations
 from app.rules import normalize_text, student_document, student_labels
 from app.schemas import SupervisorProfile
 from datasets.seed_dataset.label_descriptions import DEFAULT_LABEL_DESCRIPTIONS
-from datasets.seed_dataset.label_terms import LABEL_TERMS
 from datasets.seed_dataset.seeder import seed_affinity_matrix
 from datasets.seed_dataset.stopwords import PROFILE_TOKEN_STOPWORDS
-
-DEFAULT_CATEGORY_SUGGESTIONS = tuple(
-    sorted({label.replace("_", " ") for label in LABEL_TERMS.keys()})
-)
 
 
 def init_db() -> None:
@@ -82,14 +68,6 @@ def _normalize_supervisor_code(value: str) -> str:
 
 def _normalize_username(value: str) -> str:
     return normalize_text(value).replace(" ", "")
-
-
-def _normalize_category_name(value: str) -> str:
-    return normalize_text(value)
-
-
-def _category_to_label(value: str) -> str:
-    return _normalize_category_name(value).replace(" ", "_")
 
 
 def register_user(
@@ -134,104 +112,18 @@ def get_user_by_id(session: Session, user_id: int) -> AppUser | None:
     return queries.get_user_by_id(session, user_id)
 
 
-def _ensure_category_record(session: Session, category_name: str) -> SupervisorCategory:
-    normalized = _normalize_category_name(category_name)
-    if not normalized:
-        raise ValueError("Kategori tidak boleh kosong.")
-
-    category = queries.get_category_by_name(session, normalized)
-    if category is not None:
-        return category
-
-    category = SupervisorCategory(name=normalized)
-    session.add(category)
-    session.flush()
-    return category
-
-
 def list_supervisor_profiles_for_web(session: Session) -> list[dict[str, Any]]:
-    supervisors = queries.get_active_supervisors_with_categories(session)
-
-    rows: list[dict[str, Any]] = []
-    for supervisor in supervisors:
-        categories = sorted(
-            {
-                (link.category.name or "").strip()
-                for link in supervisor.category_links
-                if link.category and (link.category.name or "").strip()
-            }
-        )
-        rows.append(
-            {
-                "id": supervisor.id,
-                "code": supervisor.code,
-                "name": supervisor.name,
-                "profile_keywords": supervisor.profile_keywords or "",
-                "is_active": supervisor.is_active,
-                "categories": categories,
-                "categories_text": ", ".join(categories),
-            }
-        )
-    return rows
-
-
-def list_category_suggestions(session: Session) -> list[str]:
-    category_values = set(queries.get_all_category_names(session))
-    category_values.update(DEFAULT_CATEGORY_SUGGESTIONS)
-
-    tracks = {
-        normalize_text(track)
-        for track in queries.get_non_null_tracks(session)
-        if normalize_text(track)
-    }
-    category_values.update(tracks)
-    return sorted(category_values)
-
-
-def assign_supervisor_category(session: Session, supervisor_code: str, category_name: str) -> None:
-    code = str(supervisor_code or "").strip()
-    if not code:
-        raise ValueError("Kode dosen wajib diisi.")
-    supervisor = queries.get_active_supervisor_by_code(session, code)
-    if supervisor is None:
-        raise ValueError(f"Dosen {code} tidak ditemukan.")
-
-    category = _ensure_category_record(session=session, category_name=category_name)
-    if queries.get_category_assignment(session, supervisor.id, category.id) is not None:
-        session.rollback()
-        return
-
-    session.add(
-        SupervisorCategoryAssignment(
-            supervisor_id=supervisor.id,
-            category_id=category.id,
-        )
-    )
-    session.commit()
-
-
-def remove_supervisor_category(session: Session, supervisor_code: str, category_name: str) -> bool:
-    code = str(supervisor_code or "").strip()
-    normalized_category = _normalize_category_name(category_name)
-    if not code or not normalized_category:
-        return False
-
-    supervisor = queries.get_supervisor_by_code(session, code)
-    category = queries.get_category_by_name(session, normalized_category)
-    if supervisor is None or category is None:
-        return False
-
-    link = queries.get_category_assignment(session, supervisor.id, category.id)
-    if link is None:
-        return False
-
-    session.delete(link)
-    session.flush()
-
-    if queries.count_category_assignments(session, category.id) == 0:
-        session.delete(category)
-    session.commit()
-    return True
+    supervisors = queries.get_active_supervisors_ordered(session)
+    return [
+        {
+            "id": supervisor.id,
+            "code": supervisor.code,
+            "name": supervisor.name,
+            "profile_keywords": supervisor.profile_keywords or "",
+            "is_active": supervisor.is_active,
+        }
+        for supervisor in supervisors
+    ]
 
 
 def update_supervisor_keywords(session: Session, supervisor_code: str, profile_keywords: str) -> None:
@@ -288,17 +180,14 @@ def add_or_update_supervisor(
 
 def export_supervisor_configuration_excel(session: Session) -> tuple[bytes, str]:
     supervisors = list_supervisor_profiles_for_web(session)
-    category_rows = [{"category": value} for value in list_category_suggestions(session)]
     tracks = [{"track": track} for track in queries.get_distinct_student_tracks(session)]
 
     supervisor_df = pd.DataFrame(supervisors)
-    categories_df = pd.DataFrame(category_rows)
     tracks_df = pd.DataFrame(tracks)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         supervisor_df.to_excel(writer, index=False, sheet_name="supervisor_config")
-        categories_df.to_excel(writer, index=False, sheet_name="category_options")
         tracks_df.to_excel(writer, index=False, sheet_name="track_reference")
     output.seek(0)
     return output.read(), "supervisor_config_export.xlsx"
@@ -474,7 +363,7 @@ def import_students_from_bytes(
 
 
 def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
-    supervisors = queries.get_active_supervisors_with_categories(session)
+    supervisors = queries.get_active_supervisors_ordered(session)
     profiles: list[SupervisorProfile] = []
     for supervisor in supervisors:
         db_keywords = tuple(
@@ -482,27 +371,12 @@ def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
             for value in (supervisor.profile_keywords or "").split(",")
             if value.strip()
         )
-        categories = tuple(
-            sorted(
-                {
-                    (link.category.name or "").strip()
-                    for link in supervisor.category_links
-                    if link.category and (link.category.name or "").strip()
-                }
-            )
-        )
-        category_labels = tuple(
-            label
-            for label in (_category_to_label(category) for category in categories)
-            if label
-        )
-        labels = tuple(dict.fromkeys([*category_labels, "general_flexible"])) if not category_labels else category_labels
         profiles.append(
             SupervisorProfile(
                 code=supervisor.code,
                 name=supervisor.name,
-                keywords=tuple(dict.fromkeys([*db_keywords, *categories])),
-                labels=labels,
+                keywords=db_keywords,
+                labels=("general_flexible",),
             )
         )
 
@@ -593,17 +467,9 @@ def _students_for_recommender(session: Session) -> list[dict[str, Any]]:
 
 def generate_and_store_recommendations(
     session: Session,
+    overrides: RunOverrides,
     input_source: str = "manual-run",
-    overrides: RunOverrides | None = None,
 ) -> RecommendationRun:
-    if overrides is None:
-        overrides = RunOverrides(
-            embedding_model=EMBEDDING_MODEL_NAME,
-            embedding_task=EMBEDDING_TASK,
-            enable_rule_boost=ENABLE_RULE_BOOST,
-            enable_group_bonus=ENABLE_GROUP_BONUS,
-            enable_extra_docs=ENABLE_EXTRA_DOCS,
-        )
     student_payload = _students_for_recommender(session)
     if not student_payload:
         raise ValueError("Belum ada data mahasiswa. Import Excel terlebih dahulu.")
@@ -655,6 +521,9 @@ def generate_and_store_recommendations(
         "similarity_weight": SIMILARITY_WEIGHT,
         "embedding_model": overrides.embedding_model,
         "embedding_task": overrides.embedding_task,
+        "capacity_priority_codes": overrides.capacity_priority_codes,
+        "target_min_capacity": overrides.target_min_capacity,
+        "target_max_capacity": overrides.target_max_capacity,
     }
 
     note_parts: list[str] = []
@@ -667,8 +536,8 @@ def generate_and_store_recommendations(
         input_source=input_source,
         total_students=len(student_payload),
         total_supervisors=len(profiles),
-        target_min_capacity=TARGET_MIN_CAPACITY,
-        target_max_capacity=TARGET_MAX_CAPACITY,
+        target_min_capacity=overrides.target_min_capacity,
+        target_max_capacity=overrides.target_max_capacity,
         capacity_relaxed=output.capacity_plan.relaxed,
         capacity_note=output.capacity_plan.note,
         capacity_bounds_json=json.dumps(capacity_bounds),
@@ -769,8 +638,8 @@ def summary_by_supervisor(session: Session, run_id: int | None = None) -> tuple[
     summary: list[dict[str, Any]] = []
     for code, name, count in queries.get_supervisor_recommendation_counts(session, resolved_run_id):
         limit = bounds.get(code, {})
-        min_cap = limit.get("min", TARGET_MIN_CAPACITY)
-        max_cap = limit.get("max", TARGET_MAX_CAPACITY)
+        min_cap = limit.get("min")
+        max_cap = limit.get("max")
         within = min_cap <= int(count) <= max_cap
         summary.append(
             {

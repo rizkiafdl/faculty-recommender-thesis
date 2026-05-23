@@ -21,17 +21,8 @@ def normalize_text(value: object) -> str:
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
-
 def contains_any(text: str, terms: Iterable[str]) -> bool:
     return any(term in text for term in terms)
-
-
-
-
-
-def _unique_terms(values: Iterable[str]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(values))
-
 
 def detect_labels(text: str) -> set[str]:
     labels: set[str] = set()
@@ -43,7 +34,6 @@ def detect_labels(text: str) -> set[str]:
         labels.add("binus_internal_internship")
         labels.add("binus_bandung")
     return labels
-
 
 def detect_labels_semantic(
     student_vec: Any,
@@ -78,7 +68,6 @@ def profile_document(profile: SupervisorProfile) -> str:
     ]
     return normalize_text(" ".join(parts))
 
-
 def student_document(student: dict) -> str:
     parts = [
         student.get("track") or "",
@@ -88,10 +77,8 @@ def student_document(student: dict) -> str:
     ]
     return normalize_text(" ".join(parts))
 
-
 def student_labels(student: dict) -> set[str]:
     return detect_labels(student_document(student))
-
 
 def evaluate_rule_boost(
     student: dict,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import func, select, text
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.models import (
     AppUser,
@@ -10,8 +10,6 @@ from app.models import (
     RecommendationRun,
     Student,
     Supervisor,
-    SupervisorCategory,
-    SupervisorCategoryAssignment,
     SupervisorLabelAffinity,
 )
 
@@ -40,15 +38,12 @@ def get_active_supervisors(session: Session) -> list[Supervisor]:
     ).scalars().all()
 
 
-def get_active_supervisors_with_categories(session: Session) -> list[Supervisor]:
-    return session.execute(
+def get_active_supervisors_ordered(session: Session) -> list[Supervisor]:
+    return list(session.execute(
         select(Supervisor)
         .where(Supervisor.is_active.is_(True))
-        .options(
-            selectinload(Supervisor.category_links).selectinload(SupervisorCategoryAssignment.category)
-        )
         .order_by(Supervisor.code.asc())
-    ).scalars().all()
+    ).scalars().all())
 
 
 def get_supervisor_by_code(session: Session, code: str) -> Supervisor | None:
@@ -95,41 +90,6 @@ def get_current_supervisor_codes_names(session: Session) -> list[tuple]:
             func.trim(Student.current_supervisor_code) != "",
         )
     ).all()
-
-
-# ── Categories ─────────────────────────────────────────────────────────────────
-
-def get_category_by_name(session: Session, name: str) -> SupervisorCategory | None:
-    return session.execute(
-        select(SupervisorCategory).where(SupervisorCategory.name == name)
-    ).scalars().first()
-
-
-def get_all_category_names(session: Session) -> list[str]:
-    return [
-        row[0]
-        for row in session.execute(select(SupervisorCategory.name)).all()
-        if isinstance(row[0], str) and row[0].strip()
-    ]
-
-
-def get_category_assignment(
-    session: Session, supervisor_id: int, category_id: int
-) -> SupervisorCategoryAssignment | None:
-    return session.execute(
-        select(SupervisorCategoryAssignment).where(
-            SupervisorCategoryAssignment.supervisor_id == supervisor_id,
-            SupervisorCategoryAssignment.category_id == category_id,
-        )
-    ).scalars().first()
-
-
-def count_category_assignments(session: Session, category_id: int) -> int:
-    return int(session.execute(
-        select(func.count(SupervisorCategoryAssignment.id)).where(
-            SupervisorCategoryAssignment.category_id == category_id
-        )
-    ).scalar_one())
 
 
 # ── Students ───────────────────────────────────────────────────────────────────

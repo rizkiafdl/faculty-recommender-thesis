@@ -39,6 +39,9 @@ class RunOverrides:
     enable_rule_boost: bool
     enable_group_bonus: bool
     enable_extra_docs: bool
+    capacity_priority_codes: list[str]
+    target_min_capacity: int
+    target_max_capacity: int
 
 
 @dataclass

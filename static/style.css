@@ -1095,6 +1095,99 @@ pre {
 .toggle-switch input:checked + .toggle-slider { background: var(--accent, #6c63ff); }
 .toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
 
+/* Capacity priority collapsible */
+.priority-details {
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.priority-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.85rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  background: transparent;
+  transition: background 0.15s;
+}
+.priority-summary::-webkit-details-marker { display: none; }
+.priority-summary:hover { background: var(--hover, #f9f9f9); }
+
+.priority-count {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(108,99,255,0.12);
+  color: var(--accent, #6c63ff);
+}
+
+.priority-chevron {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--muted, #888);
+  transition: transform 0.2s;
+  line-height: 1;
+}
+.priority-details[open] .priority-chevron { transform: rotate(90deg); }
+
+.priority-details .config-hint {
+  margin: 0;
+  padding: 0.5rem 0.85rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--muted, #888);
+}
+
+.priority-details .toggle-grid { padding: 0.5rem 0.5rem 0.75rem; }
+
+/* Capacity bounds inputs */
+.capacity-bounds {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border-top: 1px solid var(--border, #e5e5e5);
+  flex-wrap: wrap;
+}
+
+.capacity-bound-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: default;
+}
+
+.capacity-bound-label {
+  font-size: 0.78rem;
+  color: var(--muted, #888);
+  white-space: nowrap;
+}
+
+.capacity-bound-field input[type="number"] {
+  width: 62px;
+  padding: 0.3rem 0.45rem;
+  border: 1.5px solid var(--border, #e5e5e5);
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.capacity-bound-field input[type="number"]:focus {
+  border-color: var(--accent, #6c63ff);
+}
+
+.capacity-bound-error {
+  font-size: 0.72rem;
+  color: #d94f4f;
+  flex-basis: 100%;
+}
+
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
