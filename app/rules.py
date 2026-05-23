@@ -4,7 +4,6 @@ import re
 from typing import Any, Iterable
 
 from app.config import (
-    CAPACITY_PRIORITY_CODES,
     HIGH_GPA_THRESHOLD,
 )
 from app.schemas import SupervisorProfile
@@ -67,7 +66,6 @@ def profile_document(profile: SupervisorProfile) -> str:
         *profile.labels,
     ]
     return normalize_text(" ".join(parts))
-
 
 def student_document(student: dict) -> str:
     parts = [
