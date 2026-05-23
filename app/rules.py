@@ -68,6 +68,7 @@ def profile_document(profile: SupervisorProfile) -> str:
     ]
     return normalize_text(" ".join(parts))
 
+
 def student_document(student: dict) -> str:
     parts = [
         student.get("track") or "",
@@ -86,6 +87,7 @@ def evaluate_rule_boost(
     active_labels: set[str] | None = None,
     affinity_index: dict[tuple[str, str], float] | None = None,
     niche_defaults: dict[str, float] | None = None,
+    capacity_priority_codes: list[str] | None = None,  # ← add this
 ) -> tuple[float, list[str]]:
     """
     active_labels:   set of detected label strings from detect_labels_semantic().
@@ -154,7 +156,7 @@ def evaluate_rule_boost(
     if agit and profile.code == "D1749":
         boost += 1.1; reasons.append("AGIT company affinity")
 
-    if not current_supervisor_code and profile.code in CAPACITY_PRIORITY_CODES:
+    if not current_supervisor_code and profile.code in (capacity_priority_codes or []):
         boost += 0.9; reasons.append("Unlabeled overflow routing")
 
     if high_gpa and {"research", "entrepreneurship"} & profile_labels:
