@@ -22,18 +22,14 @@ from app.evaluation import build_evaluation_payload
 from app.excel_io import read_students_from_excel_bytes, read_students_from_excel_path
 from app.models import (
     AppUser,
-    LabelDescription,
     Recommendation,
     RecommendationRun,
     Student,
     Supervisor,
-    SupervisorLabelAffinity,
 )
 from app.recommender import RunOverrides, generate_recommendations
 from app.rules import normalize_text, student_document, student_labels
 from app.schemas import SupervisorProfile
-from datasets.seed_dataset.label_descriptions import DEFAULT_LABEL_DESCRIPTIONS
-from datasets.seed_dataset.seeder import seed_affinity_matrix
 from datasets.seed_dataset.stopwords import PROFILE_TOKEN_STOPWORDS
 
 
@@ -191,128 +187,6 @@ def export_supervisor_configuration_excel(session: Session) -> tuple[bytes, str]
         tracks_df.to_excel(writer, index=False, sheet_name="track_reference")
     output.seek(0)
     return output.read(), "supervisor_config_export.xlsx"
-
-
-def load_label_descriptions(session: Session) -> list[dict]:
-    rows = queries.get_all_label_descriptions(session)
-
-    if not rows:
-        return [
-            {"label_name": n, "description": d, "threshold": t, "is_niche": nf}
-            for n, d, t, nf in DEFAULT_LABEL_DESCRIPTIONS
-        ]
-
-    return [
-        {
-            "label_name": row.label_name,
-            "description": row.description,
-            "threshold": row.threshold,
-            "is_niche": row.is_niche,
-        }
-        for row in rows
-    ]
-
-
-def save_label_description(
-    session: Session,
-    label_name: str,
-    description: str,
-    threshold: float,
-    is_niche: bool,
-) -> None:
-    row = queries.get_label_description_by_name(session, label_name)
-    if row is None:
-        session.add(LabelDescription(
-            label_name=label_name,
-            description=description,
-            threshold=threshold,
-            is_niche=is_niche,
-        ))
-    else:
-        row.description = description
-        row.threshold = threshold
-        row.is_niche = is_niche
-    session.commit()
-
-
-def reset_label_description(session: Session, label_name: str) -> None:
-    for n, d, t, nf in DEFAULT_LABEL_DESCRIPTIONS:
-        if n == label_name:
-            save_label_description(session, label_name=n, description=d, threshold=t, is_niche=nf)
-            return
-    raise ValueError(f"Label '{label_name}' tidak ada di default seed.")
-
-
-def list_students_for_preview(session: Session) -> list[dict]:
-    return [{"student_id": r[0], "name": r[1]} for r in queries.get_students_preview(session)]
-
-
-def load_affinity_lookup(session: Session) -> tuple[dict[tuple[str, str], float], dict[str, float]]:
-    if queries.count_affinity_rows(session) == 0:
-        return {}, {}
-
-    affinity_index: dict[tuple[str, str], float] = {}
-    niche_defaults: dict[str, float] = {}
-
-    for affinity_row, supervisor_code in queries.get_affinity_with_supervisor_codes(session):
-        if affinity_row.is_niche_penalty and supervisor_code is None:
-            niche_defaults[affinity_row.label_name] = affinity_row.boost_value
-        elif supervisor_code:
-            affinity_index[(supervisor_code, affinity_row.label_name)] = affinity_row.boost_value
-
-    return affinity_index, niche_defaults
-
-
-def load_affinity_matrix_for_web(
-    session: Session,
-    supervisors: list[dict],
-) -> dict[str, dict[str, float]]:
-    affinity_index, niche_defaults = load_affinity_lookup(session)
-    label_names = queries.get_label_names_ordered(session)
-
-    grid: dict[str, dict[str, float]] = {}
-    for label in label_names:
-        grid[label] = {}
-        for sup in supervisors:
-            code = sup["code"]
-            key = (code, label)
-            if key in affinity_index:
-                grid[label][code] = affinity_index[key]
-            elif label in niche_defaults:
-                grid[label][code] = niche_defaults[label]
-            else:
-                grid[label][code] = 0.0
-    return grid
-
-
-def save_affinity_cells(session: Session, cells: list[dict]) -> None:
-    supervisor_id_by_code = queries.get_supervisor_code_id_map(session)
-    for cell in cells:
-        code = str(cell.get("supervisor_code") or "").strip()
-        label_name = str(cell.get("label_name") or "").strip()
-        boost_value = float(cell.get("boost_value", 0.0))
-        if not code or not label_name:
-            continue
-        supervisor_id = supervisor_id_by_code.get(code)
-        if supervisor_id is None:
-            continue
-        existing = queries.get_affinity_by_supervisor_and_label(session, supervisor_id, label_name)
-        if existing:
-            existing.boost_value = boost_value
-        else:
-            session.add(SupervisorLabelAffinity(
-                supervisor_id=supervisor_id,
-                label_name=label_name,
-                boost_value=boost_value,
-                is_niche_penalty=False,
-            ))
-    session.commit()
-
-
-def reset_affinity_matrix(session: Session) -> None:
-    queries.delete_all_affinities(session)
-    session.commit()
-    seed_affinity_matrix(session)
 
 
 def _upsert_students(session: Session, rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -478,9 +352,6 @@ def generate_and_store_recommendations(
     if not profiles:
         raise ValueError("Belum ada data dosen aktif.")
 
-    label_descriptions = load_label_descriptions(session)
-    affinity_index, niche_defaults = load_affinity_lookup(session)
-
     try:
         extra_supervisor_docs = load_supervisor_extra_docs()
     except Exception:
@@ -489,9 +360,6 @@ def generate_and_store_recommendations(
     output = generate_recommendations(
         students=student_payload,
         supervisor_profiles=tuple(profiles),
-        label_descriptions=label_descriptions,
-        affinity_index=affinity_index,
-        niche_defaults=niche_defaults,
         extra_supervisor_docs=extra_supervisor_docs,
         overrides=overrides,
     )
@@ -515,7 +383,6 @@ def generate_and_store_recommendations(
         }
 
     pipeline_config = {
-        "rule_boost": overrides.enable_rule_boost,
         "group_bonus": overrides.enable_group_bonus,
         "extra_docs": overrides.enable_extra_docs,
         "similarity_weight": SIMILARITY_WEIGHT,
@@ -561,7 +428,6 @@ def generate_and_store_recommendations(
                 student_id=student.id,
                 supervisor_id=supervisor.id,
                 similarity_score=item.similarity_score,
-                rule_boost=item.rule_boost,
                 group_boost=item.group_boost,
                 final_score=item.final_score,
                 rule_matches="; ".join(item.rule_matches),
@@ -615,7 +481,6 @@ def list_recommendations(session: Session, run_id: int | None = None) -> tuple[R
                 "recommended_supervisor_code": supervisor.code,
                 "recommended_supervisor_name": supervisor.name,
                 "similarity_score": recommendation.similarity_score,
-                "rule_boost": recommendation.rule_boost,
                 "group_boost": recommendation.group_boost,
                 "final_score": recommendation.final_score,
                 "rule_matches": recommendation.rule_matches,

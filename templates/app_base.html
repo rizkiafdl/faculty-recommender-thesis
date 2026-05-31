@@ -24,7 +24,6 @@
           <a class="nav-link {{ 'active' if request.endpoint in ['data_center'] else '' }}" href="{{ url_for('data_center') }}">Data Center</a>
           <a class="nav-link {{ 'active' if request.endpoint in ['runs_history', 'run_detail', 'run_recommendations'] else '' }}" href="{{ url_for('runs_history') }}">Run History</a>
           <a class="nav-link {{ 'active' if request.endpoint in ['supervisors_page'] else '' }}" href="{{ url_for('supervisors_page') }}">Supervisor Studio</a>
-          <a class="nav-link {{ 'active' if request.endpoint in ['rules_studio', 'update_label_description', 'reset_label_description_route', 'preview_label_score', 'update_affinity_cells', 'reset_affinity_matrix_route'] else '' }}" href="{{ url_for('rules_studio') }}">Rules Studio</a>
         </nav>
 
         <div class="sidebar-footer">
@@ -95,15 +94,6 @@
             <label class="config-label">Pipeline Toggles</label>
             <div class="toggle-grid">
               <label class="toggle-row">
-                <span class="toggle-name">Rule Boost</span>
-                <span class="toggle-desc">Semantic label detection + affinity weights</span>
-                <div class="toggle-switch">
-                  <input type="checkbox" name="enable_rule_boost" id="tog-rb"
-                    {{ 'checked' if run_config_defaults.enable_rule_boost else '' }} />
-                  <span class="toggle-slider"></span>
-                </div>
-              </label>
-              <label class="toggle-row">
                 <span class="toggle-name">Group Bonus</span>
                 <span class="toggle-desc">Company group co-assignment bonus</span>
                 <div class="toggle-switch">
@@ -146,6 +136,7 @@
                 </label>
                 <span class="capacity-bound-error" id="cap-error"></span>
               </div>
+              <p class="config-hint" id="cap-suggestion"></p>
               <p class="config-hint">Supervisors yang diprioritaskan untuk menyerap overflow/underflow slot kapasitas.</p>
               <div class="toggle-grid" id="priority-codes-list">
                 <small class="muted">Loading supervisors…</small>
@@ -165,6 +156,7 @@
       const MODEL_STATUS_URL = "{{ url_for('model_status') }}";
       const SUPERVISORS_URL = "{{ url_for('api_supervisors') }}";
       const DEFAULT_PRIORITY_CODES = {{ run_config_defaults.capacity_priority_codes | tojson }};
+      const TOTAL_STUDENTS = {{ total_students }};
       let _statusPollInterval = null;
       let _supervisorsLoaded = false;
 
@@ -173,6 +165,14 @@
         const total = document.querySelectorAll('input[name="capacity_priority_code"]').length;
         const badge = document.getElementById('priority-count');
         if (badge) badge.textContent = total ? `${checked} / ${total}` : '';
+      }
+
+      function updateCapacitySuggestion(supervisorCount) {
+        const hint = document.getElementById('cap-suggestion');
+        if (!hint || !supervisorCount) return;
+        const sugMin = Math.floor(TOTAL_STUDENTS / supervisorCount);
+        const sugMax = Math.ceil(TOTAL_STUDENTS / supervisorCount);
+        hint.textContent = `Suggested for ${TOTAL_STUDENTS} students across ${supervisorCount} supervisors: min ${sugMin}, max ${sugMax}.`;
       }
 
       function renderPriorityCodes(supervisors) {
@@ -190,6 +190,7 @@
           </label>`;
         }).join('');
         updatePriorityCount();
+        updateCapacitySuggestion(supervisors.length);
       }
 
       function loadSupervisors() {
