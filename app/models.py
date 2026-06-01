@@ -92,6 +92,7 @@ class RecommendationRun(Base):
     evaluation_json = Column(Text, nullable=True)
     pipeline_config_json = Column(Text, nullable=True)
     objective_score = Column(Float, nullable=True)
+    rankings_json = Column(Text, nullable=True)
 
     recommendations = relationship(
         "Recommendation",

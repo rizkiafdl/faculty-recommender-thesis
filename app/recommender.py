@@ -166,7 +166,7 @@ def _apply_company_group_bonus(
 
         company_scores = score_matrix[student_indices, :]
         mean_scores = company_scores.mean(axis=0)
-        ranked = np.argsort(-mean_scores)
+        ranked = np.argsort(-mean_scores,kind="stable")
         best_supervisor_idx = int(ranked[0])
         if len(ranked) > 1:
             margin = float(mean_scores[best_supervisor_idx] - mean_scores[int(ranked[1])])
@@ -256,6 +256,9 @@ def generate_recommendations(
     if not supervisor_profiles:
         raise ValueError("Data dosen kosong.")
 
+    # Sort by code so column order — and therefore argmax tie-breaking — is
+    # deterministic regardless of the DB query order that produced supervisor_profiles.
+    supervisor_profiles = tuple(sorted(supervisor_profiles, key=lambda p: p.code))
     supervisor_codes = [profile.code for profile in supervisor_profiles]
     supervisor_docs = [
         profile_document(profile) + (
@@ -318,7 +321,7 @@ def generate_recommendations(
 
         reasons: list[str] = []
         if group_boost[student_idx, int(supervisor_idx)] > 0:
-            reasons.append("Company cohort alignment")
+            reasons.append("Content-based similarity + Company cohort alignment")
         if not reasons:
             reasons = ["Content-based similarity"]
 

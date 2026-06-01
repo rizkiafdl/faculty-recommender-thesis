@@ -17,8 +17,8 @@ DEFAULT_SHEET_NAME = os.getenv("DEFAULT_SHEET_NAME", "Sheet1")
 
 TARGET_MIN_CAPACITY = int(os.getenv("TARGET_MIN_CAPACITY", "10"))
 TARGET_MAX_CAPACITY = int(os.getenv("TARGET_MAX_CAPACITY", "12"))
-SIMILARITY_WEIGHT = float(os.getenv("SIMILARITY_WEIGHT", "100"))
-COMPANY_GROUP_BONUS = float(os.getenv("COMPANY_GROUP_BONUS", "1.5"))
+SIMILARITY_WEIGHT = float(os.getenv("SIMILARITY_WEIGHT", "1"))
+COMPANY_GROUP_BONUS = float(os.getenv("COMPANY_GROUP_BONUS", "0.2"))
 HIGH_GPA_THRESHOLD = float(os.getenv("HIGH_GPA_THRESHOLD", "3.8"))
 
 # Transformer embedding settings (content-based recommendation).
