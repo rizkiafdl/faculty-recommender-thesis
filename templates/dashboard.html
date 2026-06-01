@@ -85,6 +85,7 @@
           <a class="button-link" href="{{ url_for('run_detail', run_id=latest_run.id) }}">Open Detail</a>
           <a class="button-link ghost" href="{{ url_for('run_recommendations', run_id=latest_run.id) }}">Inspect Rows</a>
           <a class="button-link ghost" href="{{ url_for('export_run', run_id=latest_run.id) }}">Export Excel</a>
+          <a class="button-link ghost" href="{{ url_for('export_run_detailed', run_id=latest_run.id) }}">Export Excel Detailed</a>
         </div>
       {% else %}
         <p>Belum ada run. Mulai dari Data Center lalu generate run baru.</p>

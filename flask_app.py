@@ -31,6 +31,7 @@ from app.services import (
     authenticate_user,
     evaluation_by_run,
     export_recommendations_excel,
+    export_recommendations_excel_detailed,
     export_supervisor_configuration_excel,
     generate_and_store_recommendations,
     get_latest_run,
@@ -512,6 +513,26 @@ def export_run(run_id: int):
             content, filename = export_recommendations_excel(session=session, run_id=run_id)
     except Exception as exc:
         flash(f"Gagal export Excel: {exc}", "error")
+        return redirect(url_for("run_detail", run_id=run_id))
+
+    response = send_file(
+        io.BytesIO(content),
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response.headers["Content-Length"] = len(content)
+    return response
+
+
+@app.route("/runs/<int:run_id>/export/detailed", methods=["GET"])
+@login_required
+def export_run_detailed(run_id: int):
+    try:
+        with SessionLocal() as session:
+            content, filename = export_recommendations_excel_detailed(session=session, run_id=run_id)
+    except Exception as exc:
+        flash(f"Gagal export Excel Detailed: {exc}", "error")
         return redirect(url_for("run_detail", run_id=run_id))
 
     response = send_file(
