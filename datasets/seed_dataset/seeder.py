@@ -3,9 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app import queries
-from app.models import LabelDescription, Supervisor, SupervisorLabelAffinity
-from datasets.seed_dataset.affinity_matrix import DEFAULT_AFFINITY_ROWS
-from datasets.seed_dataset.label_descriptions import DEFAULT_LABEL_DESCRIPTIONS
+from app.models import Supervisor
 from datasets.seed_dataset.supervisor_profiles import SUPERVISOR_PROFILES
 
 
@@ -77,44 +75,3 @@ def seed_supervisors(session: Session) -> int:
     if changes:
         session.commit()
     return changes
-
-
-def seed_label_descriptions(session: Session) -> int:
-    existing = queries.get_existing_label_names(session)
-    changes = 0
-    for label_name, description, threshold, is_niche in DEFAULT_LABEL_DESCRIPTIONS:
-        if label_name in existing:
-            continue
-        session.add(LabelDescription(
-            label_name=label_name,
-            description=description,
-            threshold=threshold,
-            is_niche=is_niche,
-        ))
-        changes += 1
-    if changes:
-        session.commit()
-    return changes
-
-
-def seed_affinity_matrix(session: Session) -> int:
-    if queries.count_affinity_rows(session) > 0:
-        return 0
-
-    supervisor_id_by_code = queries.get_supervisor_code_id_map(session)
-
-    for code, label_name, boost_value, is_niche_penalty in DEFAULT_AFFINITY_ROWS:
-        supervisor_id = supervisor_id_by_code.get(code) if code else None
-        if code and supervisor_id is None:
-            continue
-        session.add(SupervisorLabelAffinity(
-            supervisor_id=supervisor_id,
-            label_name=label_name,
-            boost_value=boost_value,
-            is_niche_penalty=is_niche_penalty,
-        ))
-
-    session.commit()
-    return len(DEFAULT_AFFINITY_ROWS)
-
-

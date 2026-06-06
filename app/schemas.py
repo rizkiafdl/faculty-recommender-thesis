@@ -25,7 +25,6 @@ class RecommendationItem:
     student: dict[str, Any]
     supervisor: SupervisorProfile
     similarity_score: float
-    rule_boost: float
     group_boost: float
     final_score: float
     rule_matches: list[str]
@@ -36,7 +35,6 @@ class RecommendationItem:
 class RunOverrides:
     embedding_model: str
     embedding_task: str
-    enable_rule_boost: bool
     enable_group_bonus: bool
     enable_extra_docs: bool
     capacity_priority_codes: list[str]

@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
     AppUser,
-    LabelDescription,
     Recommendation,
     RecommendationRun,
     Student,
     Supervisor,
-    SupervisorLabelAffinity,
 )
 
 
@@ -94,6 +92,10 @@ def get_current_supervisor_codes_names(session: Session) -> list[tuple]:
 
 # ── Students ───────────────────────────────────────────────────────────────────
 
+def count_students(session: Session) -> int:
+    return int(session.execute(select(func.count(Student.id))).scalar_one())
+
+
 def get_all_students(session: Session) -> list[Student]:
     return session.execute(select(Student).order_by(Student.student_id.asc())).scalars().all()
 
@@ -150,63 +152,6 @@ def get_students_preview(session: Session) -> list[tuple]:
         .order_by(Student.name.asc())
         .limit(200)
     ).all()
-
-
-# ── Label Descriptions ─────────────────────────────────────────────────────────
-
-def get_all_label_descriptions(session: Session) -> list[LabelDescription]:
-    return session.execute(
-        select(LabelDescription).order_by(LabelDescription.label_name.asc())
-    ).scalars().all()
-
-
-def get_existing_label_names(session: Session) -> set[str]:
-    return {row[0] for row in session.execute(select(LabelDescription.label_name)).all()}
-
-
-def get_label_description_by_name(session: Session, label_name: str) -> LabelDescription | None:
-    return session.execute(
-        select(LabelDescription).where(LabelDescription.label_name == label_name)
-    ).scalars().first()
-
-
-def get_label_names_ordered(session: Session) -> list[str]:
-    return [
-        row[0]
-        for row in session.execute(
-            select(LabelDescription.label_name).order_by(LabelDescription.label_name.asc())
-        ).all()
-    ]
-
-
-# ── Label Affinities ───────────────────────────────────────────────────────────
-
-def count_affinity_rows(session: Session) -> int:
-    return int(session.execute(
-        select(func.count(SupervisorLabelAffinity.id))
-    ).scalar_one())
-
-
-def get_affinity_with_supervisor_codes(session: Session) -> list[tuple]:
-    return session.execute(
-        select(SupervisorLabelAffinity, Supervisor.code)
-        .outerjoin(Supervisor, SupervisorLabelAffinity.supervisor_id == Supervisor.id)
-    ).all()
-
-
-def get_affinity_by_supervisor_and_label(
-    session: Session, supervisor_id: int, label_name: str
-) -> SupervisorLabelAffinity | None:
-    return session.execute(
-        select(SupervisorLabelAffinity).where(
-            SupervisorLabelAffinity.supervisor_id == supervisor_id,
-            SupervisorLabelAffinity.label_name == label_name,
-        )
-    ).scalars().first()
-
-
-def delete_all_affinities(session: Session) -> None:
-    session.execute(text("DELETE FROM supervisor_label_affinities"))
 
 
 # ── Recommendation Runs ────────────────────────────────────────────────────────

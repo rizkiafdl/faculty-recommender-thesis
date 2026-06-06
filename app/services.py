@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -22,18 +23,14 @@ from app.evaluation import build_evaluation_payload
 from app.excel_io import read_students_from_excel_bytes, read_students_from_excel_path
 from app.models import (
     AppUser,
-    LabelDescription,
     Recommendation,
     RecommendationRun,
     Student,
     Supervisor,
-    SupervisorLabelAffinity,
 )
 from app.recommender import RunOverrides, generate_recommendations
 from app.rules import normalize_text, student_document, student_labels
-from app.schemas import SupervisorProfile
-from datasets.seed_dataset.label_descriptions import DEFAULT_LABEL_DESCRIPTIONS
-from datasets.seed_dataset.seeder import seed_affinity_matrix
+from app.schemas import RecommendationOutput, SupervisorProfile
 from datasets.seed_dataset.stopwords import PROFILE_TOKEN_STOPWORDS
 
 
@@ -53,7 +50,9 @@ def _ensure_recommendation_run_schema() -> None:
         "solver_note": "ALTER TABLE recommendation_runs ADD COLUMN solver_note TEXT",
         "embedding_backend": "ALTER TABLE recommendation_runs ADD COLUMN embedding_backend VARCHAR(64)",
         "embedding_model": "ALTER TABLE recommendation_runs ADD COLUMN embedding_model VARCHAR(255)",
-        "evaluation_json": "ALTER TABLE recommendation_runs ADD COLUMN evaluation_json TEXT",        "pipeline_config_json": "ALTER TABLE recommendation_runs ADD COLUMN pipeline_config_json TEXT",
+        "evaluation_json": "ALTER TABLE recommendation_runs ADD COLUMN evaluation_json TEXT",
+        "pipeline_config_json": "ALTER TABLE recommendation_runs ADD COLUMN pipeline_config_json TEXT",
+        "rankings_json": "ALTER TABLE recommendation_runs ADD COLUMN rankings_json TEXT",
     }
     for column_name, ddl in required_ddl.items():
         if column_name in existing_columns:
@@ -191,128 +190,6 @@ def export_supervisor_configuration_excel(session: Session) -> tuple[bytes, str]
         tracks_df.to_excel(writer, index=False, sheet_name="track_reference")
     output.seek(0)
     return output.read(), "supervisor_config_export.xlsx"
-
-
-def load_label_descriptions(session: Session) -> list[dict]:
-    rows = queries.get_all_label_descriptions(session)
-
-    if not rows:
-        return [
-            {"label_name": n, "description": d, "threshold": t, "is_niche": nf}
-            for n, d, t, nf in DEFAULT_LABEL_DESCRIPTIONS
-        ]
-
-    return [
-        {
-            "label_name": row.label_name,
-            "description": row.description,
-            "threshold": row.threshold,
-            "is_niche": row.is_niche,
-        }
-        for row in rows
-    ]
-
-
-def save_label_description(
-    session: Session,
-    label_name: str,
-    description: str,
-    threshold: float,
-    is_niche: bool,
-) -> None:
-    row = queries.get_label_description_by_name(session, label_name)
-    if row is None:
-        session.add(LabelDescription(
-            label_name=label_name,
-            description=description,
-            threshold=threshold,
-            is_niche=is_niche,
-        ))
-    else:
-        row.description = description
-        row.threshold = threshold
-        row.is_niche = is_niche
-    session.commit()
-
-
-def reset_label_description(session: Session, label_name: str) -> None:
-    for n, d, t, nf in DEFAULT_LABEL_DESCRIPTIONS:
-        if n == label_name:
-            save_label_description(session, label_name=n, description=d, threshold=t, is_niche=nf)
-            return
-    raise ValueError(f"Label '{label_name}' tidak ada di default seed.")
-
-
-def list_students_for_preview(session: Session) -> list[dict]:
-    return [{"student_id": r[0], "name": r[1]} for r in queries.get_students_preview(session)]
-
-
-def load_affinity_lookup(session: Session) -> tuple[dict[tuple[str, str], float], dict[str, float]]:
-    if queries.count_affinity_rows(session) == 0:
-        return {}, {}
-
-    affinity_index: dict[tuple[str, str], float] = {}
-    niche_defaults: dict[str, float] = {}
-
-    for affinity_row, supervisor_code in queries.get_affinity_with_supervisor_codes(session):
-        if affinity_row.is_niche_penalty and supervisor_code is None:
-            niche_defaults[affinity_row.label_name] = affinity_row.boost_value
-        elif supervisor_code:
-            affinity_index[(supervisor_code, affinity_row.label_name)] = affinity_row.boost_value
-
-    return affinity_index, niche_defaults
-
-
-def load_affinity_matrix_for_web(
-    session: Session,
-    supervisors: list[dict],
-) -> dict[str, dict[str, float]]:
-    affinity_index, niche_defaults = load_affinity_lookup(session)
-    label_names = queries.get_label_names_ordered(session)
-
-    grid: dict[str, dict[str, float]] = {}
-    for label in label_names:
-        grid[label] = {}
-        for sup in supervisors:
-            code = sup["code"]
-            key = (code, label)
-            if key in affinity_index:
-                grid[label][code] = affinity_index[key]
-            elif label in niche_defaults:
-                grid[label][code] = niche_defaults[label]
-            else:
-                grid[label][code] = 0.0
-    return grid
-
-
-def save_affinity_cells(session: Session, cells: list[dict]) -> None:
-    supervisor_id_by_code = queries.get_supervisor_code_id_map(session)
-    for cell in cells:
-        code = str(cell.get("supervisor_code") or "").strip()
-        label_name = str(cell.get("label_name") or "").strip()
-        boost_value = float(cell.get("boost_value", 0.0))
-        if not code or not label_name:
-            continue
-        supervisor_id = supervisor_id_by_code.get(code)
-        if supervisor_id is None:
-            continue
-        existing = queries.get_affinity_by_supervisor_and_label(session, supervisor_id, label_name)
-        if existing:
-            existing.boost_value = boost_value
-        else:
-            session.add(SupervisorLabelAffinity(
-                supervisor_id=supervisor_id,
-                label_name=label_name,
-                boost_value=boost_value,
-                is_niche_penalty=False,
-            ))
-    session.commit()
-
-
-def reset_affinity_matrix(session: Session) -> None:
-    queries.delete_all_affinities(session)
-    session.commit()
-    seed_affinity_matrix(session)
 
 
 def _upsert_students(session: Session, rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -465,6 +342,71 @@ def _students_for_recommender(session: Session) -> list[dict[str, Any]]:
     return items
 
 
+def _build_rankings_json(
+    output: RecommendationOutput,
+    students: list[dict[str, Any]],
+    profiles: list[SupervisorProfile],
+    top_n: int = 5,
+) -> list[dict[str, Any]]:
+    sim_matrix = output.content_similarity_matrix
+    hybrid_matrix = output.hybrid_score_matrix
+    sup_codes = output.supervisor_codes
+    sup_name_map = {p.code: p.name for p in profiles}
+    assigned_code_by_idx = {i: item.supervisor.code for i, item in enumerate(output.items)}
+
+    results: list[dict[str, Any]] = []
+    for student_idx, student in enumerate(students):
+        row = hybrid_matrix[student_idx]
+        ranked_indices = np.argsort(-row, kind="stable")
+        rank1_score = float(row[ranked_indices[0]])
+
+        candidates: list[dict[str, Any]] = []
+        seen_codes: set[str] = set()
+        for rank, sup_idx in enumerate(ranked_indices[:top_n], start=1):
+            sup_code = sup_codes[sup_idx]
+            sim_score = float(sim_matrix[student_idx, sup_idx])
+            final_score = float(row[sup_idx])
+            boost = final_score - sim_score
+            candidates.append({
+                "rank": rank,
+                "supervisor_code": sup_code,
+                "supervisor_name": sup_name_map.get(sup_code, ""),
+                "similarity_score": round(sim_score, 6),
+                "group_boost": round(boost, 6) if boost > 1e-9 else 0.0,
+                "final_score": round(final_score, 6),
+                "is_assigned": sup_code == assigned_code_by_idx.get(student_idx),
+                "score_delta_from_rank1": round(rank1_score - final_score, 6),
+            })
+            seen_codes.add(sup_code)
+
+        # Always include the assigned supervisor even if it falls outside top-N
+        a_code = assigned_code_by_idx.get(student_idx)
+        if a_code and a_code not in seen_codes:
+            sup_idx = int(np.where(np.array(sup_codes) == a_code)[0][0])
+            actual_rank = int(np.where(ranked_indices == sup_idx)[0][0]) + 1
+            sim_score = float(sim_matrix[student_idx, sup_idx])
+            final_score = float(row[sup_idx])
+            boost = final_score - sim_score
+            candidates.append({
+                "rank": actual_rank,
+                "supervisor_code": a_code,
+                "supervisor_name": sup_name_map.get(a_code, ""),
+                "similarity_score": round(sim_score, 6),
+                "group_boost": round(boost, 6) if boost > 1e-9 else 0.0,
+                "final_score": round(final_score, 6),
+                "is_assigned": True,
+                "score_delta_from_rank1": round(rank1_score - final_score, 6),
+            })
+
+        results.append({
+            "student_id": student["student_id"],
+            "student_name": student["name"],
+            "candidates": candidates,
+        })
+
+    return results
+
+
 def generate_and_store_recommendations(
     session: Session,
     overrides: RunOverrides,
@@ -478,9 +420,6 @@ def generate_and_store_recommendations(
     if not profiles:
         raise ValueError("Belum ada data dosen aktif.")
 
-    label_descriptions = load_label_descriptions(session)
-    affinity_index, niche_defaults = load_affinity_lookup(session)
-
     try:
         extra_supervisor_docs = load_supervisor_extra_docs()
     except Exception:
@@ -489,12 +428,10 @@ def generate_and_store_recommendations(
     output = generate_recommendations(
         students=student_payload,
         supervisor_profiles=tuple(profiles),
-        label_descriptions=label_descriptions,
-        affinity_index=affinity_index,
-        niche_defaults=niche_defaults,
         extra_supervisor_docs=extra_supervisor_docs,
         overrides=overrides,
     )
+    rankings_data = _build_rankings_json(output, student_payload, profiles)
     evaluation_payload = build_evaluation_payload(
         content_scores=output.content_similarity_matrix,
         hybrid_scores=output.hybrid_score_matrix,
@@ -515,7 +452,6 @@ def generate_and_store_recommendations(
         }
 
     pipeline_config = {
-        "rule_boost": overrides.enable_rule_boost,
         "group_bonus": overrides.enable_group_bonus,
         "extra_docs": overrides.enable_extra_docs,
         "similarity_weight": SIMILARITY_WEIGHT,
@@ -548,6 +484,7 @@ def generate_and_store_recommendations(
         evaluation_json=json.dumps(evaluation_payload),
         pipeline_config_json=json.dumps(pipeline_config),
         objective_score=output.objective_score,
+        rankings_json=json.dumps(rankings_data),
     )
     session.add(run)
     session.flush()
@@ -561,7 +498,6 @@ def generate_and_store_recommendations(
                 student_id=student.id,
                 supervisor_id=supervisor.id,
                 similarity_score=item.similarity_score,
-                rule_boost=item.rule_boost,
                 group_boost=item.group_boost,
                 final_score=item.final_score,
                 rule_matches="; ".join(item.rule_matches),
@@ -615,7 +551,6 @@ def list_recommendations(session: Session, run_id: int | None = None) -> tuple[R
                 "recommended_supervisor_code": supervisor.code,
                 "recommended_supervisor_name": supervisor.name,
                 "similarity_score": recommendation.similarity_score,
-                "rule_boost": recommendation.rule_boost,
                 "group_boost": recommendation.group_boost,
                 "final_score": recommendation.final_score,
                 "rule_matches": recommendation.rule_matches,
@@ -700,6 +635,50 @@ def export_recommendations_excel(
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         recommendations_df.to_excel(writer, index=False, sheet_name="recommendations")
+        summary_df.to_excel(writer, index=False, sheet_name="summary")
+        evaluation_df.to_excel(writer, index=False, sheet_name="evaluation")
+    output.seek(0)
+    return output.read(), filename
+
+
+def export_recommendations_excel_detailed(
+    session: Session,
+    run_id: int | None = None,
+) -> tuple[bytes, str]:
+    run, recommendations = list_recommendations(session=session, run_id=run_id)
+    _, summary = summary_by_supervisor(session=session, run_id=run.id)
+    _, evaluation = evaluation_by_run(session=session, run_id=run.id)
+
+    recommendations_df = pd.DataFrame(recommendations)
+    summary_df = pd.DataFrame(summary)
+    evaluation_rows: list[dict[str, Any]] = []
+    for section, metrics in evaluation.items():
+        if isinstance(metrics, dict):
+            for metric_name, value in metrics.items():
+                evaluation_rows.append({"section": section, "metric": metric_name, "value": value})
+        else:
+            evaluation_rows.append({"section": "meta", "metric": section, "value": metrics})
+    evaluation_df = pd.DataFrame(evaluation_rows)
+
+    rankings_rows: list[dict[str, Any]] = []
+    if run.rankings_json:
+        for entry in json.loads(run.rankings_json):
+            for candidate in entry["candidates"]:
+                rankings_rows.append({
+                    "student_id": entry["student_id"],
+                    "student_name": entry["student_name"],
+                    **candidate,
+                })
+    rankings_df = pd.DataFrame(rankings_rows) if rankings_rows else pd.DataFrame(
+        columns=["student_id", "student_name", "rank", "supervisor_code", "supervisor_name",
+                 "similarity_score", "group_boost", "final_score", "is_assigned", "score_delta_from_rank1"]
+    )
+
+    filename = f"rekomendasi_dosen_run_{run.id}_detailed.xlsx"
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        recommendations_df.to_excel(writer, index=False, sheet_name="recommendations")
+        rankings_df.to_excel(writer, index=False, sheet_name="rankings")
         summary_df.to_excel(writer, index=False, sheet_name="summary")
         evaluation_df.to_excel(writer, index=False, sheet_name="evaluation")
     output.seek(0)

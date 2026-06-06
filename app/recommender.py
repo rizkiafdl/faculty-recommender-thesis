@@ -10,8 +10,6 @@ from app.config import (
     SIMILARITY_WEIGHT,
 )
 from app.rules import (
-    detect_labels_semantic,
-    evaluate_rule_boost,
     normalize_text,
     profile_document,
     student_document,
@@ -31,34 +29,52 @@ def _build_capacity_plan(
     target_min: int,
     target_max: int,
 ) -> CapacityPlan:
-    supervisor_count = len(supervisor_codes)
     min_caps = [target_min for _ in supervisor_codes]
     max_caps = [target_max for _ in supervisor_codes]
     relaxed = False
     notes: list[str] = []
 
     ranked = _rank_supervisor_indices(supervisor_codes, priority_codes)
+    priority_set = set(priority_codes)
+    priority_ranked = [i for i in ranked if supervisor_codes[i] in priority_set]
 
     max_total = sum(max_caps)
     if student_count > max_total:
         overflow = student_count - max_total
         relaxed = True
-        notes.append(
-            f"Jumlah mahasiswa {student_count} > kapasitas maksimal "
-            f"{max_total} (aturan {target_min}-{target_max}). "
-            f"Sistem menambah slot +1 pada {overflow} dosen prioritas."
-        )
-        for idx in ranked:
-            if overflow <= 0:
-                break
-            max_caps[idx] += 1
-            overflow -= 1
-        loop_idx = 0
-        while overflow > 0:
-            idx = ranked[loop_idx % len(ranked)]
-            max_caps[idx] += 1
-            overflow -= 1
-            loop_idx += 1
+
+        if not priority_ranked:
+            # No priority codes selected — distribute overflow evenly across all supervisors.
+            notes.append(
+                f"Jumlah mahasiswa {student_count} > kapasitas maksimal "
+                f"{max_total} (aturan {target_min}-{target_max}). "
+                f"Tidak ada dosen prioritas; overflow didistribusikan ke semua dosen."
+            )
+            for idx in ranked:
+                if overflow <= 0:
+                    break
+                max_caps[idx] += 1
+                overflow -= 1
+            loop_idx = 0
+            while overflow > 0:
+                idx = ranked[loop_idx % len(ranked)]
+                max_caps[idx] += 1
+                overflow -= 1
+                loop_idx += 1
+        else:
+            # Non-priority supervisors stay hard-capped at target_max.
+            # All overflow is absorbed only by priority supervisors.
+            notes.append(
+                f"Jumlah mahasiswa {student_count} > kapasitas maksimal "
+                f"{max_total} (aturan {target_min}-{target_max}). "
+                f"Overflow {overflow} didistribusikan ke {len(priority_ranked)} dosen prioritas."
+            )
+            loop_idx = 0
+            while overflow > 0:
+                idx = priority_ranked[loop_idx % len(priority_ranked)]
+                max_caps[idx] += 1
+                overflow -= 1
+                loop_idx += 1
 
     min_total = sum(min_caps)
     if student_count < min_total:
@@ -109,7 +125,6 @@ def _build_capacity_plan(
         note=note,
     )
 
-
 def _company_key(partner: str | None) -> str | None:
     key = normalize_text(partner)
     if not key or key in {"-", "none", "na", "n a"}:
@@ -151,7 +166,7 @@ def _apply_company_group_bonus(
 
         company_scores = score_matrix[student_indices, :]
         mean_scores = company_scores.mean(axis=0)
-        ranked = np.argsort(-mean_scores)
+        ranked = np.argsort(-mean_scores,kind="stable")
         best_supervisor_idx = int(ranked[0])
         if len(ranked) > 1:
             margin = float(mean_scores[best_supervisor_idx] - mean_scores[int(ranked[1])])
@@ -234,9 +249,6 @@ def generate_recommendations(
     students: list[dict[str, Any]],
     supervisor_profiles: tuple[SupervisorProfile, ...],
     overrides: RunOverrides,
-    label_descriptions: list[dict] | None = None,
-    affinity_index: dict[tuple[str, str], float] | None = None,
-    niche_defaults: dict[str, float] | None = None,
     extra_supervisor_docs: dict[str, str] | None = None,
 ) -> RecommendationOutput:
     if not students:
@@ -244,6 +256,9 @@ def generate_recommendations(
     if not supervisor_profiles:
         raise ValueError("Data dosen kosong.")
 
+    # Sort by code so column order — and therefore argmax tie-breaking — is
+    # deterministic regardless of the DB query order that produced supervisor_profiles.
+    supervisor_profiles = tuple(sorted(supervisor_profiles, key=lambda p: p.code))
     supervisor_codes = [profile.code for profile in supervisor_profiles]
     supervisor_docs = [
         profile_document(profile) + (
@@ -269,40 +284,10 @@ def generate_recommendations(
 
     weighted_similarity = similarity * SIMILARITY_WEIGHT
 
-    student_active_labels: list[set[str] | None]
-    if student_vectors is not None and label_descriptions is not None and len(label_descriptions) > 0:
-        from app.embedding import get_label_embedding_cache
-        label_cache = get_label_embedding_cache()
-        student_active_labels = []
-        for i, student in enumerate(students):
-            active = detect_labels_semantic(
-                student_vectors[i], label_descriptions, label_cache, embedding_provider
-            )
-            student_active_labels.append(active if active is not None else None)
-    else:
-        student_active_labels = [None] * len(students)
-
     student_count = len(students)
     supervisor_count = len(supervisor_profiles)
-    rule_boost = np.zeros((student_count, supervisor_count), dtype=float)
-    reasons_map: dict[tuple[int, int], list[str]] = {}
 
-    if overrides.enable_rule_boost:
-        for i, student in enumerate(students):
-            for j, profile in enumerate(supervisor_profiles):
-                boost, reasons = evaluate_rule_boost(
-                    student,
-                    profile,
-                    active_labels=student_active_labels[i],
-                    affinity_index=affinity_index or {},
-                    niche_defaults=niche_defaults or {},
-                    capacity_priority_codes=overrides.capacity_priority_codes,
-                )
-                rule_boost[i, j] = boost
-                if reasons:
-                    reasons_map[(i, j)] = reasons
-
-    score_matrix = weighted_similarity + rule_boost
+    score_matrix = weighted_similarity
 
     if overrides.enable_group_bonus:
         group_boost, student_company = _apply_company_group_bonus(score_matrix, students)
@@ -334,20 +319,17 @@ def generate_recommendations(
         profile = supervisor_profiles[int(supervisor_idx)]
         counts_by_supervisor[profile.code] += 1
 
-        reasons = list(reasons_map.get((student_idx, int(supervisor_idx)), []))
+        reasons: list[str] = []
         if group_boost[student_idx, int(supervisor_idx)] > 0:
-            reasons.append("Company cohort alignment")
+            reasons.append("Content-based similarity + Company cohort alignment")
         if not reasons:
             reasons = ["Content-based similarity"]
-        else:
-            reasons = list(dict.fromkeys(reasons))
 
         items.append(
             RecommendationItem(
                 student=students[student_idx],
                 supervisor=profile,
                 similarity_score=float(similarity[student_idx, int(supervisor_idx)]),
-                rule_boost=float(rule_boost[student_idx, int(supervisor_idx)]),
                 group_boost=float(group_boost[student_idx, int(supervisor_idx)]),
                 final_score=float(score_matrix[student_idx, int(supervisor_idx)]),
                 rule_matches=reasons,

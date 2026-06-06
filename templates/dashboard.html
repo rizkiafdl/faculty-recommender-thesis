@@ -75,7 +75,6 @@
           <div><span>Objective</span><strong>{{ '%.3f'|format(latest_run.objective_score or 0.0) }}</strong></div>
           <div><span>Components</span>
             <div class="pipeline-badges">
-              <span class="pipeline-badge {{ 'badge-on' if pipeline_config_latest.get('rule_boost') else 'badge-off' }}">Rule Boost</span>
               <span class="pipeline-badge {{ 'badge-on' if pipeline_config_latest.get('group_bonus') else 'badge-off' }}">Group Bonus</span>
               <span class="pipeline-badge {{ 'badge-on' if pipeline_config_latest.get('extra_docs') else 'badge-off' }}">Extra Docs</span>
               <span class="pipeline-badge badge-on">sim×{{ pipeline_config_latest.get('similarity_weight', 1.0) }}</span>
@@ -86,6 +85,7 @@
           <a class="button-link" href="{{ url_for('run_detail', run_id=latest_run.id) }}">Open Detail</a>
           <a class="button-link ghost" href="{{ url_for('run_recommendations', run_id=latest_run.id) }}">Inspect Rows</a>
           <a class="button-link ghost" href="{{ url_for('export_run', run_id=latest_run.id) }}">Export Excel</a>
+          <a class="button-link ghost" href="{{ url_for('export_run_detailed', run_id=latest_run.id) }}">Export Excel Detailed</a>
         </div>
       {% else %}
         <p>Belum ada run. Mulai dari Data Center lalu generate run baru.</p>
@@ -122,7 +122,6 @@
               <td>{{ '%.3f'|format(item.hybrid_mrr or 0) if item.hybrid_mrr is not none else '-' }}</td>
               <td>
                 {% set pc = item.pipeline_config %}
-                <span class="pipeline-badge {{ 'badge-on' if pc.get('rule_boost') else 'badge-off' }}">RB</span>
                 <span class="pipeline-badge {{ 'badge-on' if pc.get('group_bonus') else 'badge-off' }}">GB</span>
                 <span class="pipeline-badge {{ 'badge-on' if pc.get('extra_docs') else 'badge-off' }}">ED</span>
               </td>
