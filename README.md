@@ -102,6 +102,27 @@ The app pipeline reads supervisor data exclusively from the database. `superviso
 
 ---
 
+## Batch Run
+
+Runs the pipeline across all 18 configurations automatically (3 models × 3 toggle combos × 2 capacity variants) and exports one detailed `.xlsx` per run.
+
+```bash
+python batch_run.py                              # output → output/batch_<timestamp>/
+python batch_run.py --output-dir output/my_run  # custom output folder
+```
+
+**Test matrix:**
+
+| Dimension | Variants |
+|---|---|
+| Embedding model | `BAAI/bge-m3`, `Qwen3-Embedding-0.6B`, `multilingual-e5-large-instruct` |
+| Toggle config | `no_group_bonus`, `no_extra_docs`, `both_off` |
+| Capacity priority | `no_priority` (`[]`), `default_priority` (`CAPACITY_PRIORITY_CODES`) |
+
+Each export is a multi-sheet `.xlsx` (`recommendations`, `rankings`, `summary`, `config`, `evaluation`). The `config` sheet records the exact overrides used for that run.
+
+---
+
 ## Web UI
 
 | Path | What it does |

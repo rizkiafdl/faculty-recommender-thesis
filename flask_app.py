@@ -402,7 +402,7 @@ def generate():
             embedding_task=EMBEDDING_TASK,
             enable_group_bonus="enable_group_bonus" in request.form,
             enable_extra_docs="enable_extra_docs" in request.form,
-            capacity_priority_codes=selected_priority_codes if selected_priority_codes else list(CAPACITY_PRIORITY_CODES),
+            capacity_priority_codes=selected_priority_codes,
             target_min_capacity=target_min,
             target_max_capacity=target_max,
         )
