@@ -674,12 +674,19 @@ def export_recommendations_excel_detailed(
                  "similarity_score", "group_boost", "final_score", "is_assigned", "score_delta_from_rank1"]
     )
 
+    pipeline_config = json.loads(run.pipeline_config_json) if run.pipeline_config_json else {}
+    config_rows: list[dict[str, Any]] = []
+    for key, value in pipeline_config.items():
+        config_rows.append({"key": key, "value": ", ".join(value) if isinstance(value, list) else value})
+    config_df = pd.DataFrame(config_rows)
+
     filename = f"rekomendasi_dosen_run_{run.id}_detailed.xlsx"
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         recommendations_df.to_excel(writer, index=False, sheet_name="recommendations")
         rankings_df.to_excel(writer, index=False, sheet_name="rankings")
         summary_df.to_excel(writer, index=False, sheet_name="summary")
+        config_df.to_excel(writer, index=False, sheet_name="config")
         evaluation_df.to_excel(writer, index=False, sheet_name="evaluation")
     output.seek(0)
     return output.read(), filename
