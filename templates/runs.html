@@ -9,6 +9,7 @@
           <tr>
             <th>Run</th>
             <th>Created</th>
+            <th>By</th>
             <th>Students</th>
             <th>Supervisors</th>
             <th>Model</th>
@@ -25,6 +26,7 @@
             <tr>
               <td>#{{ run.id }}</td>
               <td>{{ run.created_at }}</td>
+              <td>{{ users_map.get(run.created_by_id, '-') }}</td>
               <td>{{ run.total_students }}</td>
               <td>{{ run.total_supervisors }}</td>
               <td>{{ run.embedding_model or '-' }}</td>

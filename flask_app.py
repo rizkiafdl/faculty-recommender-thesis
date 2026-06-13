@@ -23,7 +23,7 @@ from app.config import (
 )
 from app import queries
 from app.database import SessionLocal
-from app.models import RecommendationRun, Student, Supervisor
+from app.models import AppUser, RecommendationRun, Student, Supervisor
 from app.embedding import get_provider_statuses, warmup_model  # noqa: F401
 from app.recommender import RunOverrides
 from app.services import (
@@ -408,7 +408,10 @@ def generate():
         )
         with SessionLocal() as session:
             run = generate_and_store_recommendations(
-                session=session, input_source="flask-ui", overrides=overrides
+                session=session,
+                input_source="flask-ui",
+                overrides=overrides,
+                created_by_id=g.current_user.id,
             )
         flash(f"Run rekomendasi berhasil dibuat (run_id={run.id}).", "success")
         if next_url:
@@ -570,6 +573,13 @@ def api_supervisors():
 def runs_history():
     with SessionLocal() as session:
         runs = list_runs(session=session, limit=250)
+        user_ids = {r.created_by_id for r in runs if r.created_by_id is not None}
+        users_map: dict[int, str] = {}
+        if user_ids:
+            users = session.execute(
+                select(AppUser).where(AppUser.id.in_(user_ids))
+            ).scalars().all()
+            users_map = {u.id: u.username for u in users}
     run_rows = [_run_metric_row(run) for run in runs]
     return render_template(
         "runs.html",
@@ -577,6 +587,7 @@ def runs_history():
         page_subtitle="Track every execution and jump straight to analysis pages.",
         runs=runs,
         run_rows=run_rows,
+        users_map=users_map,
     )
 
 @app.route("/supervisors", methods=["GET"])

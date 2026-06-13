@@ -39,7 +39,7 @@ def profile_document(profile: SupervisorProfile) -> str:
 def student_document(student: dict) -> str:
     parts = [
         student.get("track") or "",
-        # student.get("partner_lecturer") or "",
+        student.get("partner_lecturer") or "",
         student.get("position_topic") or "",
         student.get("work_schema") or "",
     ]
