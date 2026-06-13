@@ -53,6 +53,7 @@ def _ensure_recommendation_run_schema() -> None:
         "evaluation_json": "ALTER TABLE recommendation_runs ADD COLUMN evaluation_json TEXT",
         "pipeline_config_json": "ALTER TABLE recommendation_runs ADD COLUMN pipeline_config_json TEXT",
         "rankings_json": "ALTER TABLE recommendation_runs ADD COLUMN rankings_json TEXT",
+        "created_by_id": "ALTER TABLE recommendation_runs ADD COLUMN created_by_id INTEGER REFERENCES app_users(id)",
     }
     for column_name, ddl in required_ddl.items():
         if column_name in existing_columns:
@@ -411,6 +412,7 @@ def generate_and_store_recommendations(
     session: Session,
     overrides: RunOverrides,
     input_source: str = "manual-run",
+    created_by_id: int | None = None,
 ) -> RecommendationRun:
     student_payload = _students_for_recommender(session)
     if not student_payload:
@@ -470,6 +472,7 @@ def generate_and_store_recommendations(
 
     run = RecommendationRun(
         input_source=input_source,
+        created_by_id=created_by_id,
         total_students=len(student_payload),
         total_supervisors=len(profiles),
         target_min_capacity=overrides.target_min_capacity,

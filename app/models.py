@@ -77,6 +77,7 @@ class RecommendationRun(Base):
 
     id = Column(Integer, primary_key=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_by_id = Column(Integer, ForeignKey("app_users.id"), nullable=True)
     input_source = Column(String(255), nullable=True)
     total_students = Column(Integer, nullable=False)
     total_supervisors = Column(Integer, nullable=False)
