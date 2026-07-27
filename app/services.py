@@ -301,8 +301,8 @@ def _supervisor_profiles_from_db(session: Session) -> list[SupervisorProfile]:
         learned_terms = [term for term, freq in token_counter.most_common(16) if freq >= 2]
         learned_labels = [label for label, freq in label_counter.most_common(8) if freq >= 2]
 
-        merged_keywords = tuple(dict.fromkeys([*profile.keywords, *learned_terms]))
-        merged_labels = tuple(dict.fromkeys([*profile.labels, *learned_labels]))
+        merged_keywords = tuple(dict.fromkeys([*profile.keywords]))
+        merged_labels = tuple(dict.fromkeys([*profile.labels]))
 
         adaptive_profiles.append(
             SupervisorProfile(
